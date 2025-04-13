@@ -16,7 +16,7 @@ warnings.filterwarnings("ignore", category=SoundcardRuntimeWarning, message="dat
 
 # Configuration
 ENGLISH_MODEL_PATH = "model"
-CHINESE_MODEL_PATH = "chinese-model"  # You'll need to download a Chinese Vosk model
+CHINESE_MODEL_PATH = "chinese-model"
 SAMPLE_RATE = 16000
 BUFFER_SIZE = 1024  # Smaller buffer size may help with discontinuities
 DISPLAY_FONT = ('Arial', 24)
@@ -129,7 +129,11 @@ def capture_chinese_audio():
                             result = json.loads(recognizer.Result())
                             text = result.get('text', '')
                             if text:
-                                pinyin_result = ' '.join(pypinyin.lazy_pinyin(text))
+                                # Use tone marks in pinyin conversion
+                                pinyin_result = ' '.join(pypinyin.lazy_pinyin(
+                                    text, 
+                                    style=pypinyin.Style.TONE  # Add tone markers
+                                ))
                                 with lock:
                                     chinese_transcriptions = [text]
                                     chinese_pinyin = [pinyin_result]
@@ -138,7 +142,11 @@ def capture_chinese_audio():
                             partial = json.loads(recognizer.PartialResult())
                             text = partial.get('partial', '')
                             if text:
-                                pinyin_result = ' '.join(pypinyin.lazy_pinyin(text))
+                                # Use tone marks in pinyin conversion
+                                pinyin_result = ' '.join(pypinyin.lazy_pinyin(
+                                    text, 
+                                    style=pypinyin.Style.TONE  # Add tone markers
+                                ))
                                 with lock:
                                     chinese_transcriptions = [text]
                                     chinese_pinyin = [pinyin_result]
