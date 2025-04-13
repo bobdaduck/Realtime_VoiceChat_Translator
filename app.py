@@ -10,6 +10,7 @@ import ctypes
 import time
 import pypinyin
 import warnings
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 # Filter out the specific warning
 warnings.filterwarnings("ignore", category=SoundcardRuntimeWarning, message="data discontinuity in recording")
@@ -27,6 +28,15 @@ TEXT_COLOR = 'teal'  # Changed text color from white to teal
 english_model = Model(ENGLISH_MODEL_PATH)
 chinese_model = Model(CHINESE_MODEL_PATH)
 
+# Load Hugging Face translation models
+print("Downloading and loading translation models... (this may take a few minutes on first run)")
+zh_en_tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-zh-en")
+zh_en_model = AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-zh-en")
+
+en_zh_tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-en-zh")
+en_zh_model = AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-en-zh")
+print("Translation models loaded successfully!")
+
 # Get default speaker with loopback and microphone
 speaker = sc.default_speaker()
 loopback_mic = sc.get_microphone(speaker.id, include_loopback=True)
@@ -34,26 +44,69 @@ regular_mic = sc.default_microphone()
 
 # Shared transcription and timing
 english_transcriptions = []
+english_translations = []  # Store translations of English to Chinese
+english_pinyin = []        # Store pinyin of English translations
 chinese_transcriptions = []
 chinese_pinyin = []
+chinese_translations = []  # Store translations of Chinese to English
 last_english_text_time = 0.0
 last_chinese_text_time = 0.0
 lock = threading.Lock()
+
+def translate_chinese_to_english(text):
+    """Translate Chinese text to English using Hugging Face model"""
+    try:
+        # Skip translation if text is empty
+        if not text.strip():
+            return ""
+            
+        inputs = zh_en_tokenizer(text, return_tensors="pt", padding=True)
+        output_tokens = zh_en_model.generate(**inputs, max_length=128)
+        translation = zh_en_tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+        return translation
+    except Exception as e:
+        print(f"Chinese to English translation error: {str(e)}")
+        return f"[Translation Error: {str(e)}]"
+
+def translate_english_to_chinese(text):
+    """Translate English text to Chinese using Hugging Face model"""
+    try:
+        # Skip translation if text is empty
+        if not text.strip():
+            return ""
+            
+        inputs = en_zh_tokenizer(text, return_tensors="pt", padding=True)
+        output_tokens = en_zh_model.generate(**inputs, max_length=128)
+        translation = en_zh_tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+        return translation
+    except Exception as e:
+        print(f"English to Chinese translation error: {str(e)}")
+        return f"[Translation Error: {str(e)}]"
 
 def update_displays():
     with lock:
         current_time = time.time()
         
-        # Update English display
-        if current_time - last_english_text_time <= 5 and english_transcriptions:
-            english_text = english_transcriptions[-1]
+        # Update English display (microphone)
+        if current_time - last_english_text_time <= 5:
+            if english_transcriptions and english_pinyin:
+                english_text = f"{english_transcriptions[-1]}\n{english_pinyin[-1]}"
+            elif english_transcriptions:
+                english_text = english_transcriptions[-1]
+            else:
+                english_text = ''
         else:
             english_text = ''
         english_label.config(text=english_text)
         
-        # Update Chinese display
-        if current_time - last_chinese_text_time <= 5 and chinese_pinyin:
-            chinese_text = chinese_pinyin[-1]
+        # Update Chinese display (system audio)
+        if current_time - last_chinese_text_time <= 5:
+            if chinese_pinyin and chinese_translations:
+                chinese_text = f"{chinese_pinyin[-1]}\n{chinese_translations[-1]}"
+            elif chinese_pinyin:
+                chinese_text = chinese_pinyin[-1]
+            else:
+                chinese_text = ''
         else:
             chinese_text = ''
         chinese_label.config(text=chinese_text)
@@ -61,13 +114,14 @@ def update_displays():
     root.after(100, update_displays)  # Continue updating
 
 def capture_english_audio():
-    global english_transcriptions, last_english_text_time
+    global english_transcriptions, english_translations, english_pinyin, last_english_text_time
     recognizer = KaldiRecognizer(english_model, SAMPLE_RATE)
     
     # Error recovery retry logic
     while True:
         try:
-            with loopback_mic.recorder(samplerate=SAMPLE_RATE, 
+            # Using regular_mic for English
+            with regular_mic.recorder(samplerate=SAMPLE_RATE, 
                                       blocksize=BUFFER_SIZE, 
                                       channels=1) as recorder:
                 while True:
@@ -84,16 +138,44 @@ def capture_english_audio():
                             result = json.loads(recognizer.Result())
                             text = result.get('text', '')
                             if text:
+                                # Translate English to Chinese
+                                chinese_translation = translate_english_to_chinese(text)
+                                
+                                # Generate pinyin for the Chinese translation
+                                pinyin_result = ' '.join(pypinyin.lazy_pinyin(
+                                    chinese_translation, 
+                                    style=pypinyin.Style.TONE  # Add tone markers
+                                ))
+                                
                                 with lock:
                                     english_transcriptions = [text]
+                                    english_translations = [chinese_translation]
+                                    english_pinyin = [pinyin_result]
                                     last_english_text_time = time.time()
                         else:
                             partial = json.loads(recognizer.PartialResult())
                             text = partial.get('partial', '')
                             if text:
-                                with lock:
-                                    english_transcriptions = [text]
-                                    last_english_text_time = time.time()
+                                # Optional: Only translate complete sentences to reduce processing
+                                if len(text) > 5:  # Only translate substantial text
+                                    # Translate English to Chinese
+                                    chinese_translation = translate_english_to_chinese(text)
+                                    
+                                    # Generate pinyin for the Chinese translation
+                                    pinyin_result = ' '.join(pypinyin.lazy_pinyin(
+                                        chinese_translation, 
+                                        style=pypinyin.Style.TONE  # Add tone markers
+                                    ))
+                                    
+                                    with lock:
+                                        english_transcriptions = [text]
+                                        english_translations = [chinese_translation]
+                                        english_pinyin = [pinyin_result]
+                                        last_english_text_time = time.time()
+                                else:
+                                    with lock:
+                                        english_transcriptions = [text]
+                                        last_english_text_time = time.time()
                                     
                     except Exception as e:
                         print(f"English processing error: {str(e)}")
@@ -106,13 +188,14 @@ def capture_english_audio():
             recognizer = KaldiRecognizer(english_model, SAMPLE_RATE)
 
 def capture_chinese_audio():
-    global chinese_transcriptions, chinese_pinyin, last_chinese_text_time
+    global chinese_transcriptions, chinese_pinyin, chinese_translations, last_chinese_text_time
     recognizer = KaldiRecognizer(chinese_model, SAMPLE_RATE)
     
     # Error recovery retry logic
     while True:
         try:
-            with regular_mic.recorder(samplerate=SAMPLE_RATE, 
+            # Using loopback_mic for Chinese
+            with loopback_mic.recorder(samplerate=SAMPLE_RATE, 
                                      blocksize=BUFFER_SIZE, 
                                      channels=1) as recorder:
                 while True:
@@ -134,9 +217,14 @@ def capture_chinese_audio():
                                     text, 
                                     style=pypinyin.Style.TONE  # Add tone markers
                                 ))
+                                
+                                # Translate Chinese to English
+                                translation = translate_chinese_to_english(text)
+                                
                                 with lock:
                                     chinese_transcriptions = [text]
                                     chinese_pinyin = [pinyin_result]
+                                    chinese_translations = [translation]
                                     last_chinese_text_time = time.time()
                         else:
                             partial = json.loads(recognizer.PartialResult())
@@ -147,10 +235,22 @@ def capture_chinese_audio():
                                     text, 
                                     style=pypinyin.Style.TONE  # Add tone markers
                                 ))
-                                with lock:
-                                    chinese_transcriptions = [text]
-                                    chinese_pinyin = [pinyin_result]
-                                    last_chinese_text_time = time.time()
+                                
+                                # Optional: Only translate substantial text
+                                if len(text) > 5:
+                                    # Translate Chinese to English
+                                    translation = translate_chinese_to_english(text)
+                                    
+                                    with lock:
+                                        chinese_transcriptions = [text]
+                                        chinese_pinyin = [pinyin_result]
+                                        chinese_translations = [translation]
+                                        last_chinese_text_time = time.time()
+                                else:
+                                    with lock:
+                                        chinese_transcriptions = [text]
+                                        chinese_pinyin = [pinyin_result]
+                                        last_chinese_text_time = time.time()
                                     
                     except Exception as e:
                         print(f"Chinese processing error: {str(e)}")
