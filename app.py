@@ -21,7 +21,7 @@ CHINESE_MODEL_PATH = "chinese-model"
 SAMPLE_RATE = 16000
 BUFFER_SIZE = 1024  # Smaller buffer size may help with discontinuities
 DISPLAY_FONT = ('Arial', 24)
-WINDOW_OPACITY = 0.7
+WINDOW_OPACITY = 0.8
 TEXT_COLOR = '#20EADA'  
 
 # Windows-specific constants for transparent/click-through windows
