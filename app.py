@@ -117,6 +117,11 @@ def capture_english_audio():
     global english_transcriptions, english_translations, english_pinyin, last_english_text_time
     recognizer = KaldiRecognizer(english_model, SAMPLE_RATE)
     
+    # For debouncing and preventing stuttering
+    last_partial_text = ""
+    last_update_time = 0
+    debounce_delay = 0.2  # seconds
+    
     # Error recovery retry logic
     while True:
         try:
@@ -133,8 +138,10 @@ def capture_english_audio():
                         
                         audio_int16 = (audio_data * 32767).astype(np.int16)
                         audio_bytes = audio_int16.tobytes()
+                        current_time = time.time()
                         
                         if recognizer.AcceptWaveform(audio_bytes):
+                            # This is a complete phrase/sentence
                             result = json.loads(recognizer.Result())
                             text = result.get('text', '')
                             if text:
@@ -151,15 +158,42 @@ def capture_english_audio():
                                     english_transcriptions = [text]
                                     english_translations = [chinese_translation]
                                     english_pinyin = [pinyin_result]
-                                    last_english_text_time = time.time()
+                                    last_english_text_time = current_time
+                                    
+                                # Reset the partial text tracking
+                                last_partial_text = ""
                         else:
+                            # This is a partial result
                             partial = json.loads(recognizer.PartialResult())
                             text = partial.get('partial', '')
-                            if text:
-                                # Optional: Only translate complete sentences to reduce processing
-                                if len(text) > 5:  # Only translate substantial text
+                            
+                            # Only process if text is different from last partial and not empty
+                            if text and (text != last_partial_text) and (current_time - last_update_time > debounce_delay):
+                                # Check for stuttering pattern (simplified approach)
+                                words = text.split()
+                                
+                                # Simple stutter detection - if more than 3 identical words in a row
+                                cleaned_words = []
+                                prev_word = None
+                                repeat_count = 0
+                                
+                                for word in words:
+                                    if word == prev_word:
+                                        repeat_count += 1
+                                        if repeat_count < 2:  # Allow max 2 repeats
+                                            cleaned_words.append(word)
+                                    else:
+                                        repeat_count = 0
+                                        cleaned_words.append(word)
+                                    prev_word = word
+                                
+                                # Use the cleaned text
+                                cleaned_text = ' '.join(cleaned_words)
+                                
+                                # Optional: Only translate substantial text
+                                if len(cleaned_text) > 5:  # Only translate substantial text
                                     # Translate English to Chinese
-                                    chinese_translation = translate_english_to_chinese(text)
+                                    chinese_translation = translate_english_to_chinese(cleaned_text)
                                     
                                     # Generate pinyin for the Chinese translation
                                     pinyin_result = ' '.join(pypinyin.lazy_pinyin(
@@ -168,14 +202,18 @@ def capture_english_audio():
                                     ))
                                     
                                     with lock:
-                                        english_transcriptions = [text]
+                                        english_transcriptions = [cleaned_text]
                                         english_translations = [chinese_translation]
                                         english_pinyin = [pinyin_result]
-                                        last_english_text_time = time.time()
+                                        last_english_text_time = current_time
                                 else:
                                     with lock:
-                                        english_transcriptions = [text]
-                                        last_english_text_time = time.time()
+                                        english_transcriptions = [cleaned_text]
+                                        last_english_text_time = current_time
+                                
+                                # Update tracking variables
+                                last_partial_text = text
+                                last_update_time = current_time
                                     
                     except Exception as e:
                         print(f"English processing error: {str(e)}")
