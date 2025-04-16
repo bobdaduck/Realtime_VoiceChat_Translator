@@ -49,15 +49,21 @@ speaker = sc.default_speaker()
 loopback_mic = sc.get_microphone(speaker.id, include_loopback=True)
 regular_mic = sc.default_microphone()
 
-# Shared transcription and timing
-english_transcriptions = []
-english_translations = []  # Store translations of English to Chinese
-english_pinyin = []        # Store pinyin of English translations
-chinese_transcriptions = []
-chinese_pinyin = []
-chinese_translations = []  # Store translations of Chinese to English
-last_english_text_time = 0.0
-last_chinese_text_time = 0.0
+# Shared transcription and timing - using dictionaries for better organization
+english_display = {
+    "transcription": "",
+    "translation": "",
+    "pinyin": "",
+    "last_update_time": 0.0
+}
+
+chinese_display = {
+    "transcription": "",
+    "translation": "",
+    "pinyin": "",
+    "last_update_time": 0.0
+}
+
 lock = threading.Lock()
 
 def translate_chinese_to_english(text):
@@ -73,7 +79,7 @@ def translate_chinese_to_english(text):
         return translation
     except Exception as e:
         print(f"Chinese to English translation error: {str(e)}")
-        return f"[Translation Error: {str(e)}]"
+        return f"[Translation Error]"
 
 def translate_english_to_chinese(text):
     """Translate English text to Chinese using Hugging Face model"""
@@ -88,46 +94,106 @@ def translate_english_to_chinese(text):
         return translation
     except Exception as e:
         print(f"English to Chinese translation error: {str(e)}")
-        return f"[Translation Error: {str(e)}]"
+        return f"[Translation Error]"
+
+def generate_pinyin(chinese_text):
+    """Generate pinyin with tone marks for Chinese text"""
+    if not chinese_text.strip():
+        return ""
+    try:
+        return ' '.join(pypinyin.lazy_pinyin(
+            chinese_text, 
+            style=pypinyin.Style.TONE  # Add tone markers
+        ))
+    except Exception as e:
+        print(f"Pinyin generation error: {str(e)}")
+        return "[Pinyin Error]"
 
 def update_displays():
     with lock:
         current_time = time.time()
         
         # Update English display (microphone)
-        if current_time - last_english_text_time <= 15:
-            if english_transcriptions and english_pinyin:
-                english_text = f"{english_transcriptions[-1]}\n{english_pinyin[-1]}"
-            elif english_transcriptions:
-                english_text = english_transcriptions[-1]
-            else:
-                english_text = ''
+        if current_time - english_display["last_update_time"] <= 15:
+            english_text = f"{english_display['transcription']}\n{english_display['translation']}"
         else:
             english_text = ''
         english_label.config(text=english_text)
         
         # Update Chinese display (system audio)
-        if current_time - last_chinese_text_time <= 5:
-            if chinese_pinyin and chinese_translations:
-                chinese_text = f"{chinese_pinyin[-1]}\n{chinese_translations[-1]}"
-            elif chinese_pinyin:
-                chinese_text = chinese_pinyin[-1]
-            else:
-                chinese_text = ''
+        if current_time - chinese_display["last_update_time"] <= 5:
+            chinese_text = f"{chinese_display['pinyin']}\n{chinese_display['translation']}"
         else:
             chinese_text = ''
         chinese_label.config(text=chinese_text)
         
     root.after(100, update_displays)  # Continue updating
 
+def process_text(text, is_english):
+    """Process text once to ensure consistency between transcription and translation"""
+    if not text.strip():
+        return {"transcription": "", "translation": "", "pinyin": ""}
+    
+    current_time = time.time()
+    result = {}
+    
+    # Clean text for stuttering
+    words = text.split()
+    cleaned_words = []
+    prev_word = None
+    repeat_count = 0
+    
+    for word in words:
+        if word == prev_word:
+            repeat_count += 1
+            if repeat_count < 2:  # Allow max 2 repeats
+                cleaned_words.append(word)
+        else:
+            repeat_count = 0
+            cleaned_words.append(word)
+        prev_word = word
+    
+    cleaned_text = ' '.join(cleaned_words)
+    result["transcription"] = cleaned_text
+    
+    # Process based on language
+    if is_english:
+        # For English input
+        if len(cleaned_text) > 5:  # Only translate substantial text
+            # Translate English to Chinese
+            chinese_translation = translate_english_to_chinese(cleaned_text)
+            # Generate pinyin for the Chinese translation
+            pinyin_result = generate_pinyin(chinese_translation)
+            
+            result["translation"] = chinese_translation
+            result["pinyin"] = pinyin_result
+        else:
+            result["translation"] = ""
+            result["pinyin"] = ""
+    else:
+        # For Chinese input
+        if len(cleaned_text) > 2:  # Only translate substantial text
+            # Generate pinyin for Chinese text
+            pinyin_result = generate_pinyin(cleaned_text)
+            # Translate Chinese to English
+            english_translation = translate_chinese_to_english(cleaned_text)
+            
+            result["pinyin"] = pinyin_result
+            result["translation"] = english_translation
+        else:
+            result["pinyin"] = generate_pinyin(cleaned_text)
+            result["translation"] = ""
+    
+    return result
+
 def capture_english_audio():
-    global english_transcriptions, english_translations, english_pinyin, last_english_text_time
+    global english_display
     recognizer = KaldiRecognizer(english_model, SAMPLE_RATE)
     
     # For debouncing and preventing stuttering
     last_partial_text = ""
     last_update_time = 0
-    debounce_delay = 0.2  # seconds
+    debounce_delay = 0.4  # seconds
     
     # Error recovery retry logic
     while True:
@@ -152,20 +218,16 @@ def capture_english_audio():
                             result = json.loads(recognizer.Result())
                             text = result.get('text', '')
                             if text:
-                                # Translate English to Chinese
-                                chinese_translation = translate_english_to_chinese(text)
-                                
-                                # Generate pinyin for the Chinese translation
-                                pinyin_result = ' '.join(pypinyin.lazy_pinyin(
-                                    chinese_translation, 
-                                    style=pypinyin.Style.TONE  # Add tone markers
-                                ))
+                                # Process text once to ensure consistency
+                                processed = process_text(text, is_english=True)
                                 
                                 with lock:
-                                    english_transcriptions = [text]
-                                    english_translations = [chinese_translation]
-                                    english_pinyin = [pinyin_result]
-                                    last_english_text_time = current_time
+                                    english_display = {
+                                        "transcription": processed["transcription"],
+                                        "translation": processed["pinyin"],  # Chinese text goes on bottom
+                                        "pinyin": "",  # Not used for English input
+                                        "last_update_time": current_time
+                                    }
                                     
                                 # Reset the partial text tracking
                                 last_partial_text = ""
@@ -176,47 +238,16 @@ def capture_english_audio():
                             
                             # Only process if text is different from last partial and not empty
                             if text and (text != last_partial_text) and (current_time - last_update_time > debounce_delay):
-                                # Check for stuttering pattern (simplified approach)
-                                words = text.split()
+                                # Process text once to ensure consistency
+                                processed = process_text(text, is_english=True)
                                 
-                                # Simple stutter detection - if more than 3 identical words in a row
-                                cleaned_words = []
-                                prev_word = None
-                                repeat_count = 0
-                                
-                                for word in words:
-                                    if word == prev_word:
-                                        repeat_count += 1
-                                        if repeat_count < 2:  # Allow max 2 repeats
-                                            cleaned_words.append(word)
-                                    else:
-                                        repeat_count = 0
-                                        cleaned_words.append(word)
-                                    prev_word = word
-                                
-                                # Use the cleaned text
-                                cleaned_text = ' '.join(cleaned_words)
-                                
-                                # Optional: Only translate substantial text
-                                if len(cleaned_text) > 5:  # Only translate substantial text
-                                    # Translate English to Chinese
-                                    chinese_translation = translate_english_to_chinese(cleaned_text)
-                                    
-                                    # Generate pinyin for the Chinese translation
-                                    pinyin_result = ' '.join(pypinyin.lazy_pinyin(
-                                        chinese_translation, 
-                                        style=pypinyin.Style.TONE  # Add tone markers
-                                    ))
-                                    
-                                    with lock:
-                                        english_transcriptions = [cleaned_text]
-                                        english_translations = [chinese_translation]
-                                        english_pinyin = [pinyin_result]
-                                        last_english_text_time = current_time
-                                else:
-                                    with lock:
-                                        english_transcriptions = [cleaned_text]
-                                        last_english_text_time = current_time
+                                with lock:
+                                    english_display = {
+                                        "transcription": processed["transcription"],
+                                        "translation": processed["pinyin"],  # Chinese text goes on bottom
+                                        "pinyin": "",  # Not used for English input
+                                        "last_update_time": current_time
+                                    }
                                 
                                 # Update tracking variables
                                 last_partial_text = text
@@ -233,13 +264,13 @@ def capture_english_audio():
             recognizer = KaldiRecognizer(english_model, SAMPLE_RATE)
 
 def capture_chinese_audio():
-    global chinese_transcriptions, chinese_pinyin, chinese_translations, last_chinese_text_time
+    global chinese_display
     recognizer = KaldiRecognizer(chinese_model, SAMPLE_RATE)
     
     # For debouncing and preventing stuttering
     last_partial_text = ""
     last_update_time = 0
-    debounce_delay = 0.2  # seconds
+    debounce_delay = 0.4  # seconds
     
     # Error recovery retry logic
     while True:
@@ -264,20 +295,16 @@ def capture_chinese_audio():
                             result = json.loads(recognizer.Result())
                             text = result.get('text', '')
                             if text:
-                                # Use tone marks in pinyin conversion
-                                pinyin_result = ' '.join(pypinyin.lazy_pinyin(
-                                    text, 
-                                    style=pypinyin.Style.TONE  # Add tone markers
-                                ))
-                                
-                                # Translate Chinese to English
-                                translation = translate_chinese_to_english(text)
+                                # Process text once to ensure consistency
+                                processed = process_text(text, is_english=False)
                                 
                                 with lock:
-                                    chinese_transcriptions = [text]
-                                    chinese_pinyin = [pinyin_result]
-                                    chinese_translations = [translation]
-                                    last_chinese_text_time = current_time
+                                    chinese_display = {
+                                        "transcription": processed["transcription"],
+                                        "translation": processed["translation"],
+                                        "pinyin": processed["pinyin"],
+                                        "last_update_time": current_time
+                                    }
                                     
                                 # Reset the partial text tracking
                                 last_partial_text = ""
@@ -288,48 +315,16 @@ def capture_chinese_audio():
                             
                             # Only process if text is different from last partial and not empty
                             if text and (text != last_partial_text) and (current_time - last_update_time > debounce_delay):
-                                # Check for stuttering pattern (simplified approach)
-                                words = text.split()
+                                # Process text once to ensure consistency
+                                processed = process_text(text, is_english=False)
                                 
-                                # Simple stutter detection - if more than 3 identical words in a row
-                                cleaned_words = []
-                                prev_word = None
-                                repeat_count = 0
-                                
-                                for word in words:
-                                    if word == prev_word:
-                                        repeat_count += 1
-                                        if repeat_count < 2:  # Allow max 2 repeats
-                                            cleaned_words.append(word)
-                                    else:
-                                        repeat_count = 0
-                                        cleaned_words.append(word)
-                                    prev_word = word
-                                
-                                # Use the cleaned text
-                                cleaned_text = ' '.join(cleaned_words)
-                                
-                                # Use tone marks in pinyin conversion
-                                pinyin_result = ' '.join(pypinyin.lazy_pinyin(
-                                    cleaned_text, 
-                                    style=pypinyin.Style.TONE  # Add tone markers
-                                ))
-                                
-                                # Only translate substantial text
-                                if len(cleaned_text) > 5:
-                                    # Translate Chinese to English
-                                    translation = translate_chinese_to_english(cleaned_text)
-                                    
-                                    with lock:
-                                        chinese_transcriptions = [cleaned_text]
-                                        chinese_pinyin = [pinyin_result]
-                                        chinese_translations = [translation]
-                                        last_chinese_text_time = current_time
-                                else:
-                                    with lock:
-                                        chinese_transcriptions = [cleaned_text]
-                                        chinese_pinyin = [pinyin_result]
-                                        last_chinese_text_time = current_time
+                                with lock:
+                                    chinese_display = {
+                                        "transcription": processed["transcription"],
+                                        "translation": processed["translation"],
+                                        "pinyin": processed["pinyin"],
+                                        "last_update_time": current_time
+                                    }
                                 
                                 # Update tracking variables
                                 last_partial_text = text
