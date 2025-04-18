@@ -139,18 +139,87 @@ def update_displays(root, english_label, chinese_label, get_display_data_func):
     current_time = time.time()
     
     # Update English display (microphone)
-    if current_time - english_display["last_update_time"] <= 15:
-        english_text = f"{english_display['transcription']}\n{english_display['translation']}"
-    else:
-        english_text = ''
-    english_label.config(text=english_text)
+    if english_display["transcription"]:
+        # If this is new text (different from what we had before)
+        if english_display["transcription"] != getattr(english_label, "last_text", ""):
+            # If we already had some accumulated text and it's been less than 10 seconds
+            if (hasattr(english_label, "accumulated_text") and 
+                english_label.accumulated_text and 
+                current_time - english_label.last_update_time < 10):
+                # Append the new text to accumulated text
+                english_label.accumulated_text += "\n" + english_display["transcription"]
+                # Update translation as well
+                english_label.accumulated_translation = english_display["translation"]
+            else:
+                # Start fresh with new text
+                english_label.accumulated_text = english_display["transcription"]
+                english_label.accumulated_translation = english_display["translation"]
+                english_label.start_time = current_time
+            
+            # Update tracking variables
+            english_label.last_text = english_display["transcription"]
+            english_label.last_update_time = current_time
+            
+        # Display the accumulated text and translation
+        english_text = f"{english_label.accumulated_text}\n{english_label.accumulated_translation}"
+        english_label.config(text=english_text)
+    elif hasattr(english_label, "last_update_time"):
+        # Clear text if no updates for 10 seconds
+        if current_time - english_label.last_update_time > 10:
+            english_label.config(text="")
+            english_label.accumulated_text = ""
+            english_label.accumulated_translation = ""
     
-    # Update Chinese display (system audio)
-    if current_time - chinese_display["last_update_time"] <= 5:
-        chinese_text = f"{chinese_display['pinyin']}\n{chinese_display['translation']}"
-    else:
-        chinese_text = ''
-    chinese_label.config(text=chinese_text)
+    # Update Chinese display (system audio) - similar logic
+    if chinese_display["transcription"]:
+        # If this is new text (different from what we had before)
+        if chinese_display["transcription"] != getattr(chinese_label, "last_text", ""):
+            # If we already had some accumulated text and it's been less than 10 seconds
+            if (hasattr(chinese_label, "accumulated_text") and 
+                chinese_label.accumulated_text and 
+                current_time - chinese_label.last_update_time < 10):
+                # Append the new text to accumulated text
+                chinese_label.accumulated_text += "\n" + chinese_display["transcription"]
+                # Update pinyin and translation as well
+                chinese_label.accumulated_pinyin = chinese_display["pinyin"]
+                chinese_label.accumulated_translation = chinese_display["translation"]
+            else:
+                # Start fresh with new text
+                chinese_label.accumulated_text = chinese_display["transcription"]
+                chinese_label.accumulated_pinyin = chinese_display["pinyin"]
+                chinese_label.accumulated_translation = chinese_display["translation"]
+                chinese_label.start_time = current_time
+            
+            # Update tracking variables
+            chinese_label.last_text = chinese_display["transcription"]
+            chinese_label.last_update_time = current_time
+            
+        # Display the accumulated text, pinyin and translation
+        chinese_text = f"{chinese_label.accumulated_pinyin}\n{chinese_label.accumulated_translation}"
+        chinese_label.config(text=chinese_text)
+    elif hasattr(chinese_label, "last_update_time"):
+        # Clear text if no updates for 10 seconds
+        if current_time - chinese_label.last_update_time > 10:
+            chinese_label.config(text="")
+            chinese_label.accumulated_text = ""
+            chinese_label.accumulated_pinyin = ""
+            chinese_label.accumulated_translation = ""
+    
+    # Initialize attributes if they don't exist yet
+    if not hasattr(english_label, "accumulated_text"):
+        english_label.accumulated_text = ""
+        english_label.accumulated_translation = ""
+        english_label.last_text = ""
+        english_label.last_update_time = current_time
+        english_label.start_time = current_time
+        
+    if not hasattr(chinese_label, "accumulated_text"):
+        chinese_label.accumulated_text = ""
+        chinese_label.accumulated_pinyin = ""
+        chinese_label.accumulated_translation = ""
+        chinese_label.last_text = ""
+        chinese_label.last_update_time = current_time
+        chinese_label.start_time = current_time
     
     # Continue updating
     root.after(100, lambda: update_displays(root, english_label, chinese_label, get_display_data_func))

@@ -1,4 +1,5 @@
 import audio_capture
+import model_work
 import window_display
 
 def main():
@@ -11,7 +12,7 @@ def main():
         print("Loading translation models...")
         (english_model, chinese_model, 
          zh_en_tokenizer, zh_en_model, 
-         en_zh_tokenizer, en_zh_model) = audio_capture.initialize_translation_models()
+         en_zh_tokenizer, en_zh_model) = model_work.initialize_translation_models()
         
         # Start audio capture threads
         print("Starting audio capture threads...")
