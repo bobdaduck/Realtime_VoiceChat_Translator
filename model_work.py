@@ -1,7 +1,12 @@
 import json
 import pypinyin
 from vosk import Model
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, T5ForConditionalGeneration
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Configuration
 ENGLISH_MODEL_PATH = "model"
@@ -15,10 +20,10 @@ def initialize_translation_models():
     # Load Vosk models
     english_model = Model(ENGLISH_MODEL_PATH)
     chinese_model = Model(CHINESE_MODEL_PATH)
-    
+    chinese_translator_model = "utrobinmv/t5_translate_en_ru_zh_large_1024"
     # Load Hugging Face translation models
-    zh_en_tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-zh-en")
-    zh_en_model = AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-zh-en")
+    zh_en_tokenizer = AutoTokenizer.from_pretrained(chinese_translator_model)
+    zh_en_model = T5ForConditionalGeneration.from_pretrained(chinese_translator_model) # AutoModelForSeq2SeqLM.from_pretrained(chinese_translator_model)
     
     en_zh_tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-en-zh")
     en_zh_model = AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-en-zh")
@@ -37,7 +42,17 @@ def translate_chinese_to_english(text, zh_en_tokenizer, zh_en_model):
             return ""
             
         inputs = zh_en_tokenizer(text, return_tensors="pt", padding=True)
-        output_tokens = zh_en_model.generate(**inputs, max_length=128)
+        # Modified to use only max_new_tokens and remove max_length to suppress the warning
+        output_tokens = zh_en_model.generate(
+            **inputs,
+            max_new_tokens=50,  # Reduce token limit to prevent over-generation
+            num_beams=4,        # Use beam search for more precise results
+            early_stopping=True,
+            no_repeat_ngram_size=2,  # Avoid repeating phrases
+            temperature=0.7,    # Lower temperature for less randomness
+            top_p=0.95,         # Nucleus sampling to reduce randomness
+            do_sample=False     # Turn off sampling to get the most likely output
+        )
         translation = zh_en_tokenizer.decode(output_tokens[0], skip_special_tokens=True)
         return translation
     except Exception as e:
@@ -52,7 +67,8 @@ def translate_english_to_chinese(text, en_zh_tokenizer, en_zh_model):
             return ""
             
         inputs = en_zh_tokenizer(text, return_tensors="pt", padding=True)
-        output_tokens = en_zh_model.generate(**inputs, max_length=128)
+        # Modified to use only max_new_tokens and remove max_length to suppress the warning
+        output_tokens = en_zh_model.generate(**inputs, max_new_tokens=128)
         translation = en_zh_tokenizer.decode(output_tokens[0], skip_special_tokens=True)
         return translation
     except Exception as e:
@@ -115,10 +131,17 @@ def process_text(text, is_english, zh_en_tokenizer, zh_en_model, en_zh_tokenizer
     else:
         # For Chinese input
         if len(cleaned_text) > 1:  # Only translate substantial text
+            # Log Chinese characters received
+            logger.info(f"Chinese characters received: {cleaned_text}")
+            
             # Generate pinyin for Chinese text
             pinyin_result = generate_pinyin(cleaned_text)
+            logger.info(f"Generated pinyin: {pinyin_result}")
+            
             # Translate Chinese to English
+            logger.info(f"Sending to translation engine: {cleaned_text}")
             english_translation = translate_chinese_to_english(cleaned_text, zh_en_tokenizer, zh_en_model)
+            logger.info(f"Translation result: {english_translation}")
             
             result["pinyin"] = pinyin_result
             result["translation"] = english_translation

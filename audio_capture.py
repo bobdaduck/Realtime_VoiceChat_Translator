@@ -7,6 +7,11 @@ import threading
 import time
 import warnings
 import model_work
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+logger = logging.getLogger(__name__)
 
 # Filter out the specific warning
 warnings.filterwarnings("ignore", category=SoundcardRuntimeWarning, 
@@ -14,7 +19,7 @@ warnings.filterwarnings("ignore", category=SoundcardRuntimeWarning,
 
 # Configuration
 SAMPLE_RATE = 16000
-BUFFER_SIZE = 128     # Smaller buffer size may help with discontinuities
+BUFFER_SIZE =  1       # Smaller buffer size may help with discontinuities
 VOLUME_THRESHOLD = 0.01  # Adjust based on testing (0.0-1.0 scale)
 SILENCE_DURATION = 0.5   # Time in seconds of silence before stopping processing
 
@@ -45,12 +50,6 @@ def initialize_audio_devices():
     loopback_mic = sc.get_microphone(speaker.id, include_loopback=True)
     regular_mic = sc.default_microphone()
     return loopback_mic, regular_mic
-
-def is_above_volume_threshold(audio_data, threshold=VOLUME_THRESHOLD):
-    """Check if audio volume exceeds the threshold"""
-    # Calculate RMS (root mean square) as volume indicator
-    rms = np.sqrt(np.mean(np.square(audio_data)))
-    return rms > threshold
 
 def capture_english_audio(english_model, regular_mic, zh_en_tokenizer, zh_en_model, en_zh_tokenizer, en_zh_model):
     global english_display
@@ -96,8 +95,8 @@ def capture_english_audio(english_model, regular_mic, zh_en_tokenizer, zh_en_mod
                                 with lock:
                                     english_display = {
                                         "transcription": processed["transcription"],
-                                        "translation": processed["pinyin"],  # Chinese text goes on bottom
-                                        "pinyin": "",  # Not used for English input
+                                        "translation": processed["translation"],  # Fixed: should be translation not pinyin
+                                        "pinyin": processed["pinyin"],  # Add pinyin even if it might be empty
                                         "last_update_time": current_time
                                     }
                                     
@@ -117,13 +116,13 @@ def capture_english_audio(english_model, regular_mic, zh_en_tokenizer, zh_en_mod
                                     zh_en_model=zh_en_model, 
                                     en_zh_tokenizer=en_zh_tokenizer, 
                                     en_zh_model=en_zh_model
-                                )
+                                )   
                                 
                                 with lock:
                                     english_display = {
                                         "transcription": processed["transcription"],
-                                        "translation": processed["pinyin"],  # Chinese text goes on bottom
-                                        "pinyin": "",  # Not used for English input
+                                        "translation": processed["pinyin"], 
+                                        "pinyin": processed["pinyin"],  # Add pinyin even if it might be empty
                                         "last_update_time": current_time
                                     }
                                 
@@ -161,9 +160,9 @@ def capture_chinese_audio(chinese_model, loopback_mic, zh_en_tokenizer, zh_en_mo
                     try:
                         audio_data = recorder.record(numframes=SAMPLE_RATE)
                         if audio_data.size == 0:
-                            time.sleep(0.01)  # Small delay to reduce CPU usage
+                            time.sleep(0.001)  # Small delay to reduce CPU usage
                             continue
-                        
+
                         audio_int16 = (audio_data * 32767).astype(np.int16)
                         audio_bytes = audio_int16.tobytes()
                         current_time = time.time()
@@ -173,6 +172,9 @@ def capture_chinese_audio(chinese_model, loopback_mic, zh_en_tokenizer, zh_en_mo
                             result = json.loads(recognizer.Result())
                             text = result.get('text', '')
                             if text:
+                                logger.info("-------------- COMPLETE CHINESE AUDIO BLOCK --------------")
+                                logger.info(f"Chinese audio block received: {text}")
+                                
                                 # Process text once to ensure consistency
                                 processed = model_work.process_text(
                                     text, is_english=False, 
@@ -181,6 +183,11 @@ def capture_chinese_audio(chinese_model, loopback_mic, zh_en_tokenizer, zh_en_mo
                                     en_zh_tokenizer=en_zh_tokenizer, 
                                     en_zh_model=en_zh_model
                                 )
+                                
+                                logger.info(f"Processed transcript: {processed['transcription']}")
+                                logger.info(f"Generated pinyin: {processed['pinyin']}")
+                                logger.info(f"Translation result: {processed['translation']}")
+                                logger.info("------------------------------------------------------")
                                 
                                 with lock:
                                     chinese_display = {
@@ -199,6 +206,9 @@ def capture_chinese_audio(chinese_model, loopback_mic, zh_en_tokenizer, zh_en_mo
                             
                             # Only process if text is different from last partial and not empty
                             if text and (text != last_partial_text) and (current_time - last_update_time > debounce_delay):
+                                logger.info("-------------- PARTIAL CHINESE AUDIO --------------")
+                                logger.info(f"Partial Chinese audio detected: {text}")
+                                
                                 # Process text once to ensure consistency
                                 processed = model_work.process_text(
                                     text, is_english=False, 
@@ -207,6 +217,11 @@ def capture_chinese_audio(chinese_model, loopback_mic, zh_en_tokenizer, zh_en_mo
                                     en_zh_tokenizer=en_zh_tokenizer, 
                                     en_zh_model=en_zh_model
                                 )
+                                
+                                logger.info(f"Processed partial transcript: {processed['transcription']}")
+                                logger.info(f"Generated pinyin: {processed['pinyin']}")
+                                logger.info(f"Translation result: {processed['translation']}")
+                                logger.info("------------------------------------------------------")
                                 
                                 with lock:
                                     chinese_display = {
@@ -222,7 +237,7 @@ def capture_chinese_audio(chinese_model, loopback_mic, zh_en_tokenizer, zh_en_mo
                                     
                     except Exception as e:
                         print(f"Chinese processing error: {str(e)}")
-                        time.sleep(0.1)  # Brief pause before continuing
+                        time.sleep(0.01)  # Brief pause before continuing
                         continue
         except Exception as e:
             print(f"Chinese recorder error: {str(e)}")
