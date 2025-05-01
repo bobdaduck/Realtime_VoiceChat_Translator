@@ -95,8 +95,8 @@ def capture_english_audio(english_model, regular_mic, zh_en_tokenizer, zh_en_mod
                                 with lock:
                                     english_display = {
                                         "transcription": processed["transcription"],
-                                        "translation": processed["translation"],  # Fixed: should be translation not pinyin
-                                        "pinyin": processed["pinyin"],  # Add pinyin even if it might be empty
+                                        "translation": processed["translation"], #unlike the chinese input, english audio needs to only display pinyin
+                                        "pinyin": processed["pinyin"], 
                                         "last_update_time": current_time
                                     }
                                     

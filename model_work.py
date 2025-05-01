@@ -48,7 +48,7 @@ def translate_chinese_to_english(text, zh_en_tokenizer, zh_en_model):
             max_new_tokens=50,  # Reduce token limit to prevent over-generation
             num_beams=4,        # Use beam search for more precise results
             early_stopping=True,
-            no_repeat_ngram_size=2,  # Avoid repeating phrases
+            no_repeat_ngram_size=4,  # Avoid repeating phrases
             temperature=0.7,    # Lower temperature for less randomness
             top_p=0.95,         # Nucleus sampling to reduce randomness
             do_sample=False     # Turn off sampling to get the most likely output
@@ -69,7 +69,8 @@ def translate_english_to_chinese(text, en_zh_tokenizer, en_zh_model):
         inputs = en_zh_tokenizer(text, return_tensors="pt", padding=True)
         # Modified to use only max_new_tokens and remove max_length to suppress the warning
         output_tokens = en_zh_model.generate(**inputs, max_new_tokens=128)
-        translation = en_zh_tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+        chinese_text = en_zh_tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+        translation = generate_pinyin(chinese_text)
         return translation
     except Exception as e:
         print(f"English to Chinese translation error: {str(e)}")

@@ -15,6 +15,10 @@ DISPLAY_FONT = ('Arial', 24)
 WINDOW_OPACITY = 0.8
 TEXT_COLOR = '#20EADA'
 
+# Timing configuration for display refresh
+TEXT_DISPLAY_DURATION = 5  # How long to keep text on screen with no updates (seconds)
+CLEAR_DISPLAY_INTERVAL = 5  # How frequently to clear the display for new text (seconds)
+
 # Create a transparent overlay window (special implementation)
 class ClickThroughWindow(tk.Tk):
     def __init__(self):
@@ -138,88 +142,74 @@ def update_displays(root, english_label, chinese_label, get_display_data_func):
     
     current_time = time.time()
     
-    # Update English display (microphone)
-    if english_display["transcription"]:
-        # If this is new text (different from what we had before)
-        if english_display["transcription"] != getattr(english_label, "last_text", ""):
-            # If we already had some accumulated text and it's been less than 10 seconds
-            if (hasattr(english_label, "accumulated_text") and 
-                english_label.accumulated_text and 
-                current_time - english_label.last_update_time < 10):
-                # Append the new text to accumulated text
-                english_label.accumulated_text += "\n" + english_display["transcription"]
-                # Update translation as well
-                english_label.accumulated_translation = english_display["translation"]
-            else:
-                # Start fresh with new text
-                english_label.accumulated_text = english_display["transcription"]
-                english_label.accumulated_translation = english_display["translation"]
-                english_label.start_time = current_time
-            
-            # Update tracking variables
-            english_label.last_text = english_display["transcription"]
-            english_label.last_update_time = current_time
-            
-        # Display the accumulated text and translation
-        english_text = f"{english_label.accumulated_text}\n{english_label.accumulated_translation}"
-        english_label.config(text=english_text)
-    elif hasattr(english_label, "last_update_time"):
-        # Clear text if no updates for 10 seconds
-        if current_time - english_label.last_update_time > 10:
-            english_label.config(text="")
-            english_label.accumulated_text = ""
-            english_label.accumulated_translation = ""
-    
-    # Update Chinese display (system audio) - similar logic
-    if chinese_display["transcription"]:
-        # If this is new text (different from what we had before)
-        if chinese_display["transcription"] != getattr(chinese_label, "last_text", ""):
-            # If we already had some accumulated text and it's been less than 10 seconds
-            if (hasattr(chinese_label, "accumulated_text") and 
-                chinese_label.accumulated_text and 
-                current_time - chinese_label.last_update_time < 10):
-                # Append the new text to accumulated text
-                chinese_label.accumulated_text += "\n" + chinese_display["transcription"]
-                # Update pinyin and translation as well
-                chinese_label.accumulated_pinyin = chinese_display["pinyin"]
-                chinese_label.accumulated_translation = chinese_display["translation"]
-            else:
-                # Start fresh with new text
-                chinese_label.accumulated_text = chinese_display["transcription"]
-                chinese_label.accumulated_pinyin = chinese_display["pinyin"]
-                chinese_label.accumulated_translation = chinese_display["translation"]
-                chinese_label.start_time = current_time
-            
-            # Update tracking variables
-            chinese_label.last_text = chinese_display["transcription"]
-            chinese_label.last_update_time = current_time
-            
-        # Display the accumulated text, pinyin and translation
-        chinese_text = f"{chinese_label.accumulated_pinyin}\n{chinese_label.accumulated_translation}"
-        chinese_label.config(text=chinese_text)
-    elif hasattr(chinese_label, "last_update_time"):
-        # Clear text if no updates for 10 seconds
-        if current_time - chinese_label.last_update_time > 10:
-            chinese_label.config(text="")
-            chinese_label.accumulated_text = ""
-            chinese_label.accumulated_pinyin = ""
-            chinese_label.accumulated_translation = ""
-    
     # Initialize attributes if they don't exist yet
-    if not hasattr(english_label, "accumulated_text"):
-        english_label.accumulated_text = ""
-        english_label.accumulated_translation = ""
+    if not hasattr(english_label, "last_text"):
         english_label.last_text = ""
         english_label.last_update_time = current_time
-        english_label.start_time = current_time
+        english_label.display_start_time = current_time
+        english_label.should_clear = False
         
-    if not hasattr(chinese_label, "accumulated_text"):
-        chinese_label.accumulated_text = ""
-        chinese_label.accumulated_pinyin = ""
-        chinese_label.accumulated_translation = ""
+    if not hasattr(chinese_label, "last_text"):
         chinese_label.last_text = ""
         chinese_label.last_update_time = current_time
-        chinese_label.start_time = current_time
+        chinese_label.display_start_time = current_time
+        chinese_label.should_clear = False
+    
+    # Handle English display (microphone)
+    if english_display["transcription"]:
+        # Check if this is new text
+        if english_display["transcription"] != english_label.last_text:
+            # Check if we should clear the display before showing new text
+            elapsed_since_last_clear = current_time - getattr(english_label, "display_start_time", 0)
+            if elapsed_since_last_clear > CLEAR_DISPLAY_INTERVAL or english_label.should_clear:
+                # Start with fresh text instead of appending
+                english_text = f"{english_display['transcription']}\n{english_display['translation']}"
+                english_label.display_start_time = current_time
+                english_label.should_clear = False
+            else:
+                # Keep existing text if within the clear interval
+                english_text = f"{english_label.last_text}\n{english_display['translation']}"
+            
+            # Update the label
+            english_label.config(text=english_text)
+            english_label.last_text = english_display['transcription']
+            english_label.last_update_time = current_time
+    else:
+        # If no new text, check if we should clear the display
+        if hasattr(english_label, "last_update_time"):
+            time_since_update = current_time - english_label.last_update_time
+            if time_since_update > TEXT_DISPLAY_DURATION:
+                english_label.config(text="")
+                english_label.last_text = ""
+                english_label.should_clear = True
+    
+    # Handle Chinese display (system audio) - similar logic
+    if chinese_display["transcription"]:
+        # Check if this is new text
+        if chinese_display["transcription"] != chinese_label.last_text:
+            # Check if we should clear the display before showing new text
+            elapsed_since_last_clear = current_time - getattr(chinese_label, "display_start_time", 0)
+            if elapsed_since_last_clear > CLEAR_DISPLAY_INTERVAL or chinese_label.should_clear:
+                # Start with fresh text instead of appending
+                chinese_text = f"{chinese_display['pinyin']}\n{chinese_display['translation']}"
+                chinese_label.display_start_time = current_time
+                chinese_label.should_clear = False
+            else:
+                # Keep existing text if within the clear interval
+                chinese_text = f"{chinese_display['pinyin']}\n{chinese_display['translation']}"
+            
+            # Update the label
+            chinese_label.config(text=chinese_text)
+            chinese_label.last_text = chinese_display['transcription']
+            chinese_label.last_update_time = current_time
+    else:
+        # If no new text, check if we should clear the display
+        if hasattr(chinese_label, "last_update_time"):
+            time_since_update = current_time - chinese_label.last_update_time
+            if time_since_update > TEXT_DISPLAY_DURATION:
+                chinese_label.config(text="")
+                chinese_label.last_text = ""
+                chinese_label.should_clear = True
     
     # Continue updating
     root.after(100, lambda: update_displays(root, english_label, chinese_label, get_display_data_func))
