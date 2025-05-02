@@ -1,12 +1,18 @@
 import json
 import pypinyin
 from vosk import Model
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, T5ForConditionalGeneration
 import logging
+from chinese_english_lookup import Dictionary
+import jieba
+import re
+import translators as ts
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Initialize CC-CEDICT dictionary
+ce_dict = Dictionary()
 
 # Configuration
 ENGLISH_MODEL_PATH = "model"
@@ -14,140 +20,76 @@ CHINESE_MODEL_PATH = "chinese-model"
 SAMPLE_RATE = 16000
 
 def initialize_translation_models():
-    """Initialize and load all machine learning models needed for translation"""
-    print("Downloading and loading translation models... (this may take a few minutes on first run)")
+    """Initialize and load all models needed for translation"""
+    print("Loading translation models...")
     
-    # Load Vosk models
+    # Load Vosk models for speech recognition
     english_model = Model(ENGLISH_MODEL_PATH)
     chinese_model = Model(CHINESE_MODEL_PATH)
-    chinese_translator_model = "utrobinmv/t5_translate_en_ru_zh_large_1024"
-    # Load Hugging Face translation models
-    zh_en_tokenizer = AutoTokenizer.from_pretrained(chinese_translator_model)
-    zh_en_model = T5ForConditionalGeneration.from_pretrained(chinese_translator_model) # AutoModelForSeq2SeqLM.from_pretrained(chinese_translator_model)
     
-    en_zh_tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-en-zh")
-    en_zh_model = AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-en-zh")
-    
+    print("CC-CEDICT dictionary ready to use")
     print("Translation models loaded successfully!")
     
-    return (english_model, chinese_model, 
-            zh_en_tokenizer, zh_en_model, 
-            en_zh_tokenizer, en_zh_model)
+    return (english_model, chinese_model, None, None, None, None)
 
-def translate_chinese_to_english(text, zh_en_tokenizer, zh_en_model):
-    """Translate Chinese text to English using Hugging Face model"""
-    try:
-        # Skip translation if text is empty
-        if not text.strip():
-            return ""
-            
-        inputs = zh_en_tokenizer(text, return_tensors="pt", padding=True)
-        # Modified to use only max_new_tokens and remove max_length to suppress the warning
-        output_tokens = zh_en_model.generate(
-            **inputs,
-            max_new_tokens=50,  # Reduce token limit to prevent over-generation
-            num_beams=4,        # Use beam search for more precise results
-            early_stopping=True,
-            no_repeat_ngram_size=4,  # Avoid repeating phrases
-            temperature=0.7,    # Lower temperature for less randomness
-            top_p=0.95,         # Nucleus sampling to reduce randomness
-            do_sample=False     # Turn off sampling to get the most likely output
-        )
-        translation = zh_en_tokenizer.decode(output_tokens[0], skip_special_tokens=True)
-        return translation
-    except Exception as e:
-        print(f"Chinese to English translation error: {str(e)}")
-        return f"[Translation Error]"
+def translate_chinese_to_english(text):
+    """Translate Chinese text to English """
+    return ts.translate_text(text, translator='caiyun', from_language='zh', to_language='en')
 
-def translate_english_to_chinese(text, en_zh_tokenizer, en_zh_model):
-    """Translate English text to Chinese using Hugging Face model"""
-    try:
-        # Skip translation if text is empty
-        if not text.strip():
-            return ""
-            
-        inputs = en_zh_tokenizer(text, return_tensors="pt", padding=True)
-        # Modified to use only max_new_tokens and remove max_length to suppress the warning
-        output_tokens = en_zh_model.generate(**inputs, max_new_tokens=128)
-        chinese_text = en_zh_tokenizer.decode(output_tokens[0], skip_special_tokens=True)
-        translation = generate_pinyin(chinese_text)
-        return translation
-    except Exception as e:
-        print(f"English to Chinese translation error: {str(e)}")
-        return f"[Translation Error]"
+
+def translate_english_to_chinese(text):
+    """Translate English text to Chinese """
+    return ts.translate_text(text, translator='caiyun', from_language='en', to_language='zh')
 
 def generate_pinyin(chinese_text):
     """Generate pinyin with tone marks for Chinese text"""
     if not chinese_text.strip():
         return ""
     try:
-        return ' '.join(pypinyin.lazy_pinyin(
+        return ' '.join(pypinyin.lazy_pinyin( #adds tone marks
             chinese_text, 
-            style=pypinyin.Style.TONE  # Add tone markers
+            style=pypinyin.Style.TONE
         ))
     except Exception as e:
         print(f"Pinyin generation error: {str(e)}")
         return "[Pinyin Error]"
 
-def process_text(text, is_english, zh_en_tokenizer, zh_en_model, en_zh_tokenizer, en_zh_model):
+def process_text(text, is_english, *args):
     """Process text once to ensure consistency between transcription and translation"""
     if not text.strip():
         return {"transcription": "", "translation": "", "pinyin": ""}
     
     result = {}
-    
-    # Clean text for stuttering
     words = text.split()
-    cleaned_words = []
-    prev_word = None
-    repeat_count = 0
-    
-    for word in words:
-        if word == prev_word:
-            repeat_count += 1
-            if repeat_count < 2:  # Allow max 2 repeats
-                cleaned_words.append(word)
+    cleaned, prev, count = [], None, 0
+    for w in words:
+        if w == prev:
+            count += 1
+            if count < 2:
+                cleaned.append(w)
         else:
-            repeat_count = 0
-            cleaned_words.append(word)
-        prev_word = word
-    
-    cleaned_text = ' '.join(cleaned_words)
+            count = 0
+            cleaned.append(w)
+        prev = w
+    cleaned_text = ' '.join(cleaned)
     result["transcription"] = cleaned_text
     
-    # Process based on language
     if is_english:
-        # For English input
-        if len(cleaned_text) > 1:  # Only translate substantial text
-            # Translate English to Chinese
-            chinese_translation = translate_english_to_chinese(cleaned_text, en_zh_tokenizer, en_zh_model)
-            # Generate pinyin for the Chinese translation
-            pinyin_result = generate_pinyin(chinese_translation)
-            
-            result["translation"] = chinese_translation
-            result["pinyin"] = pinyin_result
+        if len(cleaned_text) > 1:
+            cn_trans = translate_english_to_chinese(cleaned_text)
+            result["translation"] = cn_trans
+            result["pinyin"] = generate_pinyin(cn_trans)
         else:
-            result["translation"] = ""
-            result["pinyin"] = ""
+            result.update({"translation": "", "pinyin": ""})
     else:
-        # For Chinese input
-        if len(cleaned_text) > 1:  # Only translate substantial text
-            # Log Chinese characters received
+        if len(cleaned_text) > 1:
             logger.info(f"Chinese characters received: {cleaned_text}")
-            
-            # Generate pinyin for Chinese text
-            pinyin_result = generate_pinyin(cleaned_text)
-            logger.info(f"Generated pinyin: {pinyin_result}")
-            
-            # Translate Chinese to English
-            logger.info(f"Sending to translation engine: {cleaned_text}")
-            english_translation = translate_chinese_to_english(cleaned_text, zh_en_tokenizer, zh_en_model)
-            logger.info(f"Translation result: {english_translation}")
-            
-            result["pinyin"] = pinyin_result
-            result["translation"] = english_translation
+            pin = generate_pinyin(cleaned_text)
+            logger.info(f"Generated pinyin: {pin}")
+            en_trans = translate_chinese_to_english(cleaned_text)
+            logger.info(f"Translation result: {en_trans}")
+            result.update({"pinyin": pin, "translation": en_trans})
         else:
             result["pinyin"] = generate_pinyin(cleaned_text)
             result["translation"] = ""
-    
     return result

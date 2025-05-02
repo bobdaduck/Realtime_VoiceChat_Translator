@@ -10,15 +10,12 @@ def main():
         
         # Initialize translation models
         print("Loading translation models...")
-        (english_model, chinese_model, 
-         zh_en_tokenizer, zh_en_model, 
-         en_zh_tokenizer, en_zh_model) = model_work.initialize_translation_models()
+        (english_model, chinese_model, _, _, _, _) = model_work.initialize_translation_models()
         
         # Start audio capture threads
         print("Starting audio capture threads...")
         english_thread, chinese_thread = audio_capture.start_audio_threads(
-            english_model, chinese_model, regular_mic, loopback_mic,
-            zh_en_tokenizer, zh_en_model, en_zh_tokenizer, en_zh_model
+            english_model, chinese_model, regular_mic, loopback_mic
         )
         
         # Create and run the window

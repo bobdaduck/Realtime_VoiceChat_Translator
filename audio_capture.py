@@ -8,6 +8,7 @@ import time
 import warnings
 import model_work
 import logging
+from collections import deque
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -19,13 +20,14 @@ warnings.filterwarnings("ignore", category=SoundcardRuntimeWarning,
 
 # Configuration
 SAMPLE_RATE = 16000
-BUFFER_SIZE =  1       # Smaller buffer size may help with discontinuities
+BUFFER_SIZE = 1       # Smaller buffer size may help with discontinuities
 VOLUME_THRESHOLD = 0.01  # Adjust based on testing (0.0-1.0 scale)
 SILENCE_DURATION = 0.5   # Time in seconds of silence before stopping processing
+CHINESE_TEXT_WINDOW = 4  # Number of seconds to keep Chinese text in rolling window
 
 # Shared data and locks
 english_display = {
-"transcription": "",
+    "transcription": "",
     "translation": "",
     "pinyin": "",
     "last_update_time": 0.0,
@@ -42,6 +44,10 @@ chinese_display = {
     "accumulated_text": ""
 }
 
+# NEW: Rolling window for Chinese text segments
+chinese_text_segments = deque(maxlen=CHINESE_TEXT_WINDOW)
+chinese_last_processed_time = 0
+
 lock = threading.Lock()
 
 # Initialize audio devices
@@ -51,7 +57,11 @@ def initialize_audio_devices():
     regular_mic = sc.default_microphone()
     return loopback_mic, regular_mic
 
-def capture_english_audio(english_model, regular_mic, zh_en_tokenizer, zh_en_model, en_zh_tokenizer, en_zh_model):
+def capture_english_audio(english_model, regular_mic, *args):
+    """
+    Capture English audio and process it
+    Note: *args is used to maintain compatibility with the original function signature
+    """
     global english_display
     recognizer = KaldiRecognizer(english_model, SAMPLE_RATE)
     
@@ -83,19 +93,13 @@ def capture_english_audio(english_model, regular_mic, zh_en_tokenizer, zh_en_mod
                             result = json.loads(recognizer.Result())
                             text = result.get('text', '')
                             if text:
-                                # Process text once to ensure consistency
-                                processed = model_work.process_text(
-                                    text, is_english=True, 
-                                    zh_en_tokenizer=zh_en_tokenizer, 
-                                    zh_en_model=zh_en_model, 
-                                    en_zh_tokenizer=en_zh_tokenizer, 
-                                    en_zh_model=en_zh_model
-                                )
+                                # Process text 
+                                processed = model_work.process_text(text, is_english=True)
                                 
                                 with lock:
                                     english_display = {
                                         "transcription": processed["transcription"],
-                                        "translation": processed["translation"], #unlike the chinese input, english audio needs to only display pinyin
+                                        "translation": processed["translation"], 
                                         "pinyin": processed["pinyin"], 
                                         "last_update_time": current_time
                                     }
@@ -109,20 +113,14 @@ def capture_english_audio(english_model, regular_mic, zh_en_tokenizer, zh_en_mod
                             
                             # Only process if text is different from last partial and not empty
                             if text and (text != last_partial_text) and (current_time - last_update_time > debounce_delay):
-                                # Process text once to ensure consistency
-                                processed = model_work.process_text(
-                                    text, is_english=True, 
-                                    zh_en_tokenizer=zh_en_tokenizer, 
-                                    zh_en_model=zh_en_model, 
-                                    en_zh_tokenizer=en_zh_tokenizer, 
-                                    en_zh_model=en_zh_model
-                                )   
+                                # Process text
+                                processed = model_work.process_text(text, is_english=True)
                                 
                                 with lock:
                                     english_display = {
                                         "transcription": processed["transcription"],
-                                        "translation": processed["pinyin"], 
-                                        "pinyin": processed["pinyin"],  # Add pinyin even if it might be empty
+                                        "translation": processed["translation"], 
+                                        "pinyin": processed["pinyin"],
                                         "last_update_time": current_time
                                     }
                                 
@@ -140,14 +138,13 @@ def capture_english_audio(english_model, regular_mic, zh_en_tokenizer, zh_en_mod
             # Reset recognizer in case it's corrupted
             recognizer = KaldiRecognizer(english_model, SAMPLE_RATE)
 
-def capture_chinese_audio(chinese_model, loopback_mic, zh_en_tokenizer, zh_en_model, en_zh_tokenizer, en_zh_model):
-    global chinese_display
+def capture_chinese_audio(chinese_model, loopback_mic, *args):
+    """
+    Capture Chinese audio and process it with rolling window approach
+    Note: *args is used to maintain compatibility with the original function signature
+    """
+    global chinese_display, chinese_text_segments, chinese_last_processed_time
     recognizer = KaldiRecognizer(chinese_model, SAMPLE_RATE)
-    
-    # For debouncing and preventing stuttering
-    last_partial_text = ""
-    last_update_time = 0
-    debounce_delay = 0.2  # seconds
     
     # Error recovery retry logic
     while True:
@@ -167,73 +164,41 @@ def capture_chinese_audio(chinese_model, loopback_mic, zh_en_tokenizer, zh_en_mo
                         audio_bytes = audio_int16.tobytes()
                         current_time = time.time()
                         
+                        # Let Vosk process audio in its natural way
                         if recognizer.AcceptWaveform(audio_bytes):
-                            # This is a complete phrase/sentence
+                            # This is a complete phrase/sentence determined by Vosk
                             result = json.loads(recognizer.Result())
                             text = result.get('text', '')
-                            if text:
-                                logger.info("-------------- COMPLETE CHINESE AUDIO BLOCK --------------")
-                                logger.info(f"Chinese audio block received: {text}")
+                            
+                            if text and text.strip():
+                                logger.info("-------------- COMPLETE CHINESE PHRASE --------------")
+                                logger.info(f"Chinese text recognized: {text}")
                                 
-                                # Process text once to ensure consistency
-                                processed = model_work.process_text(
-                                    text, is_english=False, 
-                                    zh_en_tokenizer=zh_en_tokenizer, 
-                                    zh_en_model=zh_en_model, 
-                                    en_zh_tokenizer=en_zh_tokenizer, 
-                                    en_zh_model=en_zh_model
-                                )
-                                
-                                logger.info(f"Processed transcript: {processed['transcription']}")
-                                logger.info(f"Generated pinyin: {processed['pinyin']}")
-                                logger.info(f"Translation result: {processed['translation']}")
-                                logger.info("------------------------------------------------------")
-                                
+                                # Add the completed phrase to our rolling window
                                 with lock:
+                                    chinese_text_segments.append(text)
+                                    
+                                    # Check if we need to process the combined text
+                                    full_text = ' '.join(chinese_text_segments)
+                                    processed = model_work.process_text(full_text, is_english=False)
+                                    
                                     chinese_display = {
-                                        "transcription": processed["transcription"],
+                                        "transcription": full_text,
                                         "translation": processed["translation"],
                                         "pinyin": processed["pinyin"],
                                         "last_update_time": current_time
                                     }
                                     
-                                # Reset the partial text tracking
-                                last_partial_text = ""
-                        else:
-                            # This is a partial result
-                            partial = json.loads(recognizer.PartialResult())
-                            text = partial.get('partial', '')
-                            
-                            # Only process if text is different from last partial and not empty
-                            if text and (text != last_partial_text) and (current_time - last_update_time > debounce_delay):
-                                logger.info("-------------- PARTIAL CHINESE AUDIO --------------")
-                                logger.info(f"Partial Chinese audio detected: {text}")
+                                    chinese_last_processed_time = current_time
                                 
-                                # Process text once to ensure consistency
-                                processed = model_work.process_text(
-                                    text, is_english=False, 
-                                    zh_en_tokenizer=zh_en_tokenizer, 
-                                    zh_en_model=zh_en_model, 
-                                    en_zh_tokenizer=en_zh_tokenizer, 
-                                    en_zh_model=en_zh_model
-                                )
-                                
-                                logger.info(f"Processed partial transcript: {processed['transcription']}")
-                                logger.info(f"Generated pinyin: {processed['pinyin']}")
-                                logger.info(f"Translation result: {processed['translation']}")
+                                logger.info(f"Window size: {len(chinese_text_segments)} segments")
+                                logger.info(f"Combined text: {full_text}")
+                                logger.info(f"Translation: {processed['translation']}")
                                 logger.info("------------------------------------------------------")
-                                
-                                with lock:
-                                    chinese_display = {
-                                        "transcription": processed["transcription"],
-                                        "translation": processed["translation"],
-                                        "pinyin": processed["pinyin"],
-                                        "last_update_time": current_time
-                                    }
-                                
-                                # Update tracking variables
-                                last_partial_text = text
-                                last_update_time = current_time
+                        else:
+                            # This is a partial result - we don't need to do anything with it
+                            # Vosk will eventually produce a complete result when appropriate
+                            pass
                                     
                     except Exception as e:
                         print(f"Chinese processing error: {str(e)}")
@@ -245,19 +210,22 @@ def capture_chinese_audio(chinese_model, loopback_mic, zh_en_tokenizer, zh_en_mo
             # Reset recognizer in case it's corrupted
             recognizer = KaldiRecognizer(chinese_model, SAMPLE_RATE)
 
-def start_audio_threads(english_model, chinese_model, regular_mic, loopback_mic, 
-                        zh_en_tokenizer, zh_en_model, en_zh_tokenizer, en_zh_model):
+def start_audio_threads(english_model, chinese_model, regular_mic, loopback_mic, *args):
+    """
+    Start audio capture threads
+    Note: *args is used to maintain compatibility with the original function signature
+    """
     # Start capture threads
     english_thread = threading.Thread(
         target=capture_english_audio, 
-        args=(english_model, regular_mic, zh_en_tokenizer, zh_en_model, en_zh_tokenizer, en_zh_model),
+        args=(english_model, regular_mic),
         daemon=True
     )
     english_thread.start()
 
     chinese_thread = threading.Thread(
         target=capture_chinese_audio, 
-        args=(chinese_model, loopback_mic, zh_en_tokenizer, zh_en_model, en_zh_tokenizer, en_zh_model),
+        args=(chinese_model, loopback_mic),
         daemon=True
     )
     chinese_thread.start()

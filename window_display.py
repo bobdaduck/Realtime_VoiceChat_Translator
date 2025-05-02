@@ -11,7 +11,7 @@ LWA_ALPHA = 0x00000002
 LWA_COLORKEY = 0x00000001
 
 # Display configuration
-DISPLAY_FONT = ('Arial', 24)
+DISPLAY_FONT = ('Arial', 14)
 WINDOW_OPACITY = 0.8
 TEXT_COLOR = '#20EADA'
 
@@ -163,12 +163,12 @@ def update_displays(root, english_label, chinese_label, get_display_data_func):
             elapsed_since_last_clear = current_time - getattr(english_label, "display_start_time", 0)
             if elapsed_since_last_clear > CLEAR_DISPLAY_INTERVAL or english_label.should_clear:
                 # Start with fresh text instead of appending
-                english_text = f"{english_display['transcription']}\n{english_display['translation']}"
+                english_text = f"{english_display['transcription']}\n{english_display['pinyin']}" #English display should not show chinese characters!
                 english_label.display_start_time = current_time
                 english_label.should_clear = False
             else:
                 # Keep existing text if within the clear interval
-                english_text = f"{english_label.last_text}\n{english_display['translation']}"
+                english_text = f"{english_label.last_text}\n{english_display['pinyin']}"
             
             # Update the label
             english_label.config(text=english_text)
