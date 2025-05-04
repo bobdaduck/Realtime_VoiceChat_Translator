@@ -1,6 +1,7 @@
 import audio_capture
 import model_work
 import window_display
+import audio_preprocessing  # Import the new module
 
 def main():
     try:
@@ -11,6 +12,11 @@ def main():
         # Initialize translation models
         print("Loading translation models...")
         (english_model, chinese_model, _, _, _, _) = model_work.initialize_translation_models()
+        
+        # Print some information about the audio preprocessing settings
+        print(f"Audio preprocessing settings:")
+        print(f"  - Bandpass filter: {audio_preprocessing.BANDPASS_LOW}-{audio_preprocessing.BANDPASS_HIGH} Hz")
+        print(f"  - Noise reduction factor: {audio_preprocessing.NOISE_REDUCTION_FACTOR}")
         
         # Start audio capture threads
         print("Starting audio capture threads...")

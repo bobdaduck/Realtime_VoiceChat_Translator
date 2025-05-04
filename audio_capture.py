@@ -9,6 +9,7 @@ import warnings
 import model_work
 import logging
 from collections import deque
+import audio_preprocessing as ap  # Import audio preprocessing module
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -44,7 +45,7 @@ chinese_display = {
     "accumulated_text": ""
 }
 
-# NEW: Rolling window for Chinese text segments
+# Rolling window for Chinese text segments
 chinese_text_segments = deque(maxlen=CHINESE_TEXT_WINDOW)
 chinese_last_processed_time = 0
 
@@ -84,7 +85,10 @@ def capture_english_audio(english_model, regular_mic, *args):
                             time.sleep(0.01)  # Small delay to reduce CPU usage
                             continue
                         
-                        audio_int16 = (audio_data * 32767).astype(np.int16)
+                        # Apply simple filtering to the audio
+                        processed_audio, _ = ap.preprocess_buffer(audio_data)
+                        
+                        audio_int16 = (processed_audio * 32767).astype(np.int16)
                         audio_bytes = audio_int16.tobytes()
                         current_time = time.time()
                         
@@ -144,6 +148,7 @@ def capture_chinese_audio(chinese_model, loopback_mic, *args):
     Note: *args is used to maintain compatibility with the original function signature
     """
     global chinese_display, chinese_text_segments, chinese_last_processed_time
+    
     recognizer = KaldiRecognizer(chinese_model, SAMPLE_RATE)
     
     # Error recovery retry logic
@@ -160,7 +165,11 @@ def capture_chinese_audio(chinese_model, loopback_mic, *args):
                             time.sleep(0.001)  # Small delay to reduce CPU usage
                             continue
 
-                        audio_int16 = (audio_data * 32767).astype(np.int16)
+                        # Apply simple filtering to the audio
+                        processed_audio, _ = ap.preprocess_buffer(audio_data)
+                        
+                        # Convert to int16 for Vosk
+                        audio_int16 = (processed_audio * 32767).astype(np.int16)
                         audio_bytes = audio_int16.tobytes()
                         current_time = time.time()
                         
