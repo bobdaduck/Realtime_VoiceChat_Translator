@@ -1,10 +1,6 @@
-import json
 import pypinyin
 from vosk import Model as VoskModel
 import logging
-from chinese_english_lookup import Dictionary
-import jieba
-import re
 import translators as ts
 import funasr
 import numpy as np
@@ -15,8 +11,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Initialize CC-CEDICT dictionary
-ce_dict = Dictionary()
 
 # Configuration
 ENGLISH_MODEL_PATH = "model"
