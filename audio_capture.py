@@ -15,7 +15,7 @@ import audio_preprocessing as ap  # Import audio preprocessing module
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
 
-# Filter out the specific warning
+# Filter out specific warnings and progres bars
 warnings.filterwarnings("ignore", category=SoundcardRuntimeWarning, 
                        message="data discontinuity in recording")
 
@@ -90,6 +90,7 @@ def capture_english_audio(english_model, regular_mic, *args):
                         
                         audio_int16 = (processed_audio * 32767).astype(np.int16)
                         audio_bytes = audio_int16.tobytes()
+                        # ap.play_after_delay(audio_int16, SAMPLE_RATE, delay=2.0)
                         current_time = time.time()
                         
                         if recognizer.AcceptWaveform(audio_bytes):
@@ -144,12 +145,17 @@ def capture_english_audio(english_model, regular_mic, *args):
 
 def capture_chinese_audio(chinese_model, loopback_mic, *args):
     """
-    Capture Chinese audio and process it with rolling window approach
+    Capture Chinese audio and process it with funASR's Paraformer model using a timer-based approach
     Note: *args is used to maintain compatibility with the original function signature
     """
     global chinese_display, chinese_text_segments, chinese_last_processed_time
     
-    recognizer = KaldiRecognizer(chinese_model, SAMPLE_RATE)
+    # Configuration for timer-based processing
+    PROCESS_INTERVAL = 3.0  # Process every 3 seconds of audio
+    
+    # Buffer for collecting audio
+    audio_buffer = []
+    last_process_time = time.time()
     
     # Error recovery retry logic
     while True:
@@ -165,49 +171,99 @@ def capture_chinese_audio(chinese_model, loopback_mic, *args):
                             time.sleep(0.001)  # Small delay to reduce CPU usage
                             continue
 
-                        # Apply simple filtering to the audio
+                        # Apply existing audio preprocessing
                         processed_audio, _ = ap.preprocess_buffer(audio_data)
-                        
-                        # Convert to int16 for Vosk
-                        audio_int16 = (processed_audio * 32767).astype(np.int16)
-                        audio_bytes = audio_int16.tobytes()
+                        ###################only for debugging
+                        # audio_int16 = (processed_audio * 32767).astype(np.int16)
+                        # ap.play_after_delay(audio_int16, SAMPLE_RATE, delay=2.0)
+                        #########################debugging done
+
                         current_time = time.time()
                         
-                        # Let Vosk process audio in its natural way
-                        if recognizer.AcceptWaveform(audio_bytes):
-                            # This is a complete phrase/sentence determined by Vosk
-                            result = json.loads(recognizer.Result())
-                            text = result.get('text', '')
-                            
-                            if text and text.strip():
-                                logger.info("-------------- COMPLETE CHINESE PHRASE --------------")
-                                logger.info(f"Chinese text recognized: {text}")
+                        # Add the processed audio to our buffer
+                        audio_buffer.append(processed_audio)
+                        
+                        # Check if it's time to process the buffer
+                        if current_time - last_process_time >= PROCESS_INTERVAL:
+                            # Process the collected audio buffer
+                            if audio_buffer:
+                                logger.info("-------------- PROCESSING CHINESE AUDIO --------------")
                                 
-                                # Add the completed phrase to our rolling window
-                                with lock:
-                                    chinese_text_segments.append(text)
+                                try:
+                                    # Combine all audio chunks
+                                    combined_audio = np.concatenate(audio_buffer)
                                     
-                                    # Check if we need to process the combined text
-                                    full_text = ' '.join(chinese_text_segments)
-                                    processed = model_work.process_text(full_text, is_english=False)
+                                    # IMPORTANT: Ensure the audio is 1D for funASR
+                                    # This is specific to fixing the dimension issue
+                                    if len(combined_audio.shape) > 1:
+                                        # Extract first channel if multi-dimensional
+                                        combined_audio = combined_audio[:, 0]
                                     
-                                    chinese_display = {
-                                        "transcription": full_text,
-                                        "translation": processed["translation"],
-                                        "pinyin": processed["pinyin"],
-                                        "last_update_time": current_time
-                                    }
+                                    # Make sure audio is float32 in [-1.0, 1.0] range
+                                    if combined_audio.dtype != np.float32:
+                                        combined_audio = combined_audio.astype(np.float32)
                                     
-                                    chinese_last_processed_time = current_time
+                                    if np.max(np.abs(combined_audio)) > 1.0:
+                                        combined_audio = combined_audio / np.max(np.abs(combined_audio))
+                                    
+                                    # Instead of converting to int16, keep the audio as float32 in [-1.0, 1.0]
+                                    audio_for_model = combined_audio  # This remains in float32
+
+                                    logger.info(f"Audio buffer size: {len(audio_buffer)}, Combined shape: {audio_for_model.shape}")
+
+                                    # Process with funASR model
+                                    try:
+                                        # Make sure the audio is not empty and has valid data
+                                        if audio_for_model.size > 0 and np.any(audio_for_model != 0):
+                                                            
+                                            # The generate method expects waveform data in float32 format
+                                            result = chinese_model.generate(audio_for_model)
+                                            # logger.warn(f"funASR generate result: {result}")
+                                            # print(f"funASR generate result: {result}")
+
+                                            # Extract the text from the result (check exact structure)
+                                            if result and len(result) > 0 and len(result[0]) > 0:
+                                                
+                                                text = result[0].get("text", "")
+                                                
+                                                if text and text.strip():
+                                                    logger.info(f"Chinese text recognized: {text}")
+                                                    
+                                                    # Add the completed phrase to our rolling window
+                                                    with lock:
+                                                        chinese_text_segments.append(text)
+                                                        
+                                                        # Process the combined text
+                                                        full_text = ' '.join(chinese_text_segments)
+                                                        processed = model_work.process_text(full_text, is_english=False)
+                                                        
+                                                        chinese_display = {
+                                                            "transcription": full_text,
+                                                            "translation": processed["translation"],
+                                                            "pinyin": processed["pinyin"],
+                                                            "last_update_time": current_time
+                                                        }
+                                                        
+                                                        chinese_last_processed_time = current_time
+                                            else:
+                                                logger.info("No speech detected in this audio segment")
+                                        else:
+                                            logger.info("Audio buffer contains no valid data")
+                                    except Exception as e:
+                                        logger.error(f"Error in funASR model processing: {str(e)}")
+                                        # Print more detailed error info
+                                        import traceback
+                                        logger.error(traceback.format_exc())
+                                except Exception as e:
+                                    logger.error(f"Error preparing audio data: {str(e)}")
+                                    import traceback
+                                    logger.error(traceback.format_exc())
                                 
-                                logger.info(f"Window size: {len(chinese_text_segments)} segments")
-                                logger.info(f"Combined text: {full_text}")
-                                logger.info(f"Translation: {processed['translation']}")
+                                # Reset buffer and timer for next interval
+                                audio_buffer = []
+                                last_process_time = current_time
+                                
                                 logger.info("------------------------------------------------------")
-                        else:
-                            # This is a partial result - we don't need to do anything with it
-                            # Vosk will eventually produce a complete result when appropriate
-                            pass
                                     
                     except Exception as e:
                         print(f"Chinese processing error: {str(e)}")
@@ -216,8 +272,6 @@ def capture_chinese_audio(chinese_model, loopback_mic, *args):
         except Exception as e:
             print(f"Chinese recorder error: {str(e)}")
             time.sleep(1)  # Wait a bit before trying to reconnect
-            # Reset recognizer in case it's corrupted
-            recognizer = KaldiRecognizer(chinese_model, SAMPLE_RATE)
 
 def start_audio_threads(english_model, chinese_model, regular_mic, loopback_mic, *args):
     """

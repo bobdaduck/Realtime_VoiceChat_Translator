@@ -1,6 +1,9 @@
 import numpy as np
 import scipy.signal as signal
 import logging
+import threading
+import time
+import sounddevice as sd
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -8,14 +11,13 @@ logger = logging.getLogger(__name__)
 
 # Configuration constants
 SAMPLE_RATE = 16000
-FRAME_SIZE = 512  # For short-time processing
 
 # Bandpass filter parameters (focus on human speech: 300-3000 Hz)
 BANDPASS_LOW = 300
-BANDPASS_HIGH = 3000
+BANDPASS_HIGH = 3200
 
 # Noise reduction parameters
-NOISE_REDUCTION_FACTOR = 0.1  # Very light noise reduction, just to smooth out audio
+NOISE_REDUCTION_FACTOR = 1.4 
 
 def design_bandpass_filter():
     """Design a bandpass filter to focus on human speech frequencies"""
@@ -95,3 +97,21 @@ def preprocess_buffer(audio_buffer, *args):
     
     # Return None as the second value for compatibility with existing code
     return processed_audio, None
+
+
+
+
+
+def play_after_delay(audio_array: np.ndarray,
+                     samplerate: int = SAMPLE_RATE,
+                     delay: float = 2.0):
+    """
+    Play back a NumPy audio buffer after `delay` seconds for debugging
+    """
+    def _player():
+        time.sleep(delay)
+        sd.play(audio_array, samplerate)
+        # optionally block until done:
+        # sd.wait()
+
+    threading.Thread(target=_player, daemon=True).start()
