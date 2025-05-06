@@ -13,6 +13,7 @@ import os
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 # Initialize CC-CEDICT dictionary
 ce_dict = Dictionary()
@@ -60,12 +61,17 @@ def initialize_translation_models():
 
 def translate_chinese_to_english(text):
     """Translate Chinese text to English """
-    return ts.translate_text(text, translator='caiyun', from_language='zh', to_language='en')
-
+    try:
+        return ts.translate_text(text, translator='caiyun', from_language='zh', to_language='en')
+    except:
+        logger.error(f"Failure in translator service attempting to send {text}")
 
 def translate_english_to_chinese(text):
     """Translate English text to Chinese """
-    return ts.translate_text(text, translator='caiyun', from_language='en', to_language='zh')
+    try:
+        return ts.translate_text(text, translator='caiyun', from_language='en', to_language='zh')
+    except:
+        logger.error(f"Failure in translator service attempting to send {text}")
 
 def generate_pinyin(chinese_text):
     """Generate pinyin with tone marks for Chinese text"""

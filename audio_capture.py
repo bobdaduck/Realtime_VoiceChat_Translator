@@ -90,6 +90,7 @@ def capture_english_audio(english_model, regular_mic, *args):
                         
                         audio_int16 = (processed_audio * 32767).astype(np.int16)
                         audio_bytes = audio_int16.tobytes()
+                        # ap.play_after_delay(audio_int16, SAMPLE_RATE, delay=2.0)
                         current_time = time.time()
                         
                         if recognizer.AcceptWaveform(audio_bytes):
@@ -172,6 +173,11 @@ def capture_chinese_audio(chinese_model, loopback_mic, *args):
 
                         # Apply existing audio preprocessing
                         processed_audio, _ = ap.preprocess_buffer(audio_data)
+                        ###################only for debugging
+                        # audio_int16 = (processed_audio * 32767).astype(np.int16)
+                        # ap.play_after_delay(audio_int16, SAMPLE_RATE, delay=2.0)
+                        #########################debugging done
+
                         current_time = time.time()
                         
                         # Add the processed audio to our buffer
@@ -190,7 +196,6 @@ def capture_chinese_audio(chinese_model, loopback_mic, *args):
                                     # IMPORTANT: Ensure the audio is 1D for funASR
                                     # This is specific to fixing the dimension issue
                                     if len(combined_audio.shape) > 1:
-                                        logger.info(f"Converting audio from shape {combined_audio.shape} to 1D")
                                         # Extract first channel if multi-dimensional
                                         combined_audio = combined_audio[:, 0]
                                     
@@ -210,11 +215,9 @@ def capture_chinese_audio(chinese_model, loopback_mic, *args):
                                     try:
                                         # Make sure the audio is not empty and has valid data
                                         if audio_for_model.size > 0 and np.any(audio_for_model != 0):
-                                            logger.info(f"Passing audio of shape {audio_for_model.shape} to funASR")
                                                             
                                             # The generate method expects waveform data in float32 format
                                             result = chinese_model.generate(audio_for_model)
-                                            # logger.info(f"funASR generate result: {result}")
                                             # logger.warn(f"funASR generate result: {result}")
                                             # print(f"funASR generate result: {result}")
 
@@ -242,10 +245,6 @@ def capture_chinese_audio(chinese_model, loopback_mic, *args):
                                                         }
                                                         
                                                         chinese_last_processed_time = current_time
-                                                    
-                                                    logger.info(f"Window size: {len(chinese_text_segments)} segments")
-                                                    logger.info(f"Combined text: {full_text}")
-                                                    logger.info(f"Translation: {processed['translation']}")
                                             else:
                                                 logger.info("No speech detected in this audio segment")
                                         else:
