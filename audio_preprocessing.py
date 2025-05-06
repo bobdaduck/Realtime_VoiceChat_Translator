@@ -8,14 +8,13 @@ logger = logging.getLogger(__name__)
 
 # Configuration constants
 SAMPLE_RATE = 16000
-FRAME_SIZE = 512  # For short-time processing
 
 # Bandpass filter parameters (focus on human speech: 300-3000 Hz)
 BANDPASS_LOW = 300
-BANDPASS_HIGH = 3000
+BANDPASS_HIGH = 3200
 
 # Noise reduction parameters
-NOISE_REDUCTION_FACTOR = 0.1  # Very light noise reduction, just to smooth out audio
+NOISE_REDUCTION_FACTOR = 0.5  # Very light noise reduction, just to smooth out audio
 
 def design_bandpass_filter():
     """Design a bandpass filter to focus on human speech frequencies"""
