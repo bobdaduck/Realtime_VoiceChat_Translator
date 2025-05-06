@@ -13,7 +13,7 @@ logger.setLevel(logging.INFO)
 
 
 # Configuration
-ENGLISH_MODEL_PATH = "model"
+ENGLISH_MODEL_PATH = "vosk-en"
 CHINESE_MODEL_PATH = "paraformer-zh"  # Path to funASR paraformer-zh model
 SAMPLE_RATE = 16000
 
