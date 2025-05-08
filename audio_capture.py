@@ -86,7 +86,7 @@ def capture_english_audio(english_model, regular_mic, *args):
                             continue
                         
                         # Apply simple filtering to the audio
-                        processed_audio, _ = ap.preprocess_buffer(audio_data)
+                        processed_audio = ap.process_audio(audio_data)
                         
                         audio_int16 = (processed_audio * 32767).astype(np.int16)
                         audio_bytes = audio_int16.tobytes()
@@ -172,7 +172,7 @@ def capture_chinese_audio(chinese_model, loopback_mic, *args):
                             continue
 
                         # Apply existing audio preprocessing
-                        processed_audio, _ = ap.preprocess_buffer(audio_data)
+                        processed_audio = ap.process_audio(audio_data)
                         ###################only for debugging
                         # audio_int16 = (processed_audio * 32767).astype(np.int16)
                         # ap.play_after_delay(audio_int16, SAMPLE_RATE, delay=2.0)

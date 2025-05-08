@@ -12,12 +12,10 @@ logger = logging.getLogger(__name__)
 # Configuration constants
 SAMPLE_RATE = 16000
 
-# Bandpass filter parameters (focus on human speech: 300-3000 Hz)
-BANDPASS_LOW = 300
-BANDPASS_HIGH = 3200
+# Bandpass filter parameters (focus on human speech: 300-3000 Hz), these are divided from samplerate/2 so 8000 is max
+BANDPASS_LOW = 100
+BANDPASS_HIGH = 3000
 
-# Noise reduction parameters
-NOISE_REDUCTION_FACTOR = 1.4 
 
 def design_bandpass_filter():
     """Design a bandpass filter to focus on human speech frequencies"""
@@ -42,65 +40,48 @@ def apply_bandpass_filter(audio_data):
         logger.error(f"Error applying bandpass filter: {str(e)}")
         return audio_data  # Return original on error
 
-def apply_light_smoothing(audio_data):
-    """
-    Apply very light smoothing to reduce high frequency noise
-    without trying to do advanced noise reduction
-    """
-    try:
-        # Apply a very mild gain to smooth the signal
-        # This just attenuates the signal slightly to reduce noise
-        gain = 1.0 - NOISE_REDUCTION_FACTOR
-        return audio_data * gain
-    except Exception as e:
-        logger.error(f"Error in audio smoothing: {str(e)}")
-        return audio_data  # Return original on error
+def apply_modulation_filterbank(audio, fs=SAMPLE_RATE,
+                                mod_low=.2, mod_high=20,
+                                order=4, mix=0.9, floor=0.8):
+    # ensure correct dtype/contiguity
+    audio = np.ascontiguousarray(audio, dtype=np.float32)
+
+    # 1. extract envelope
+    env = np.abs(signal.hilbert(audio))
+
+    # 2. band-pass the envelope
+    nyq = fs/2
+    b, a = signal.butter(order, [mod_low/nyq, mod_high/nyq], btype='band')
+    env_f = signal.lfilter(b, a, env)
+
+    # 3. safe normalize
+    peak = env_f.max()
+    peak = peak if peak > 1e-8 else 1e-8
+    env_f = env_f / peak
+    env_f = np.clip(env_f, floor, 1.0)
+
+    # 4. re-apply to carrier, mix with dry
+    out = mix * (audio * env_f) + (1 - mix) * audio
+
+    # keep same length
+    return out[:len(audio)]
 
 def process_audio(audio_data):
     """
     Simple audio processing function that just applies filtering
-    
-    Parameters:
-    - audio_data: Input audio data (numpy array)
-    
-    Returns:
-    - Processed audio data
     """
+    processed_audio_sample = audio_data
     try:
-        # Step 1: Apply bandpass filter
-        filtered_audio = apply_bandpass_filter(audio_data)
-        
-        # Step 2: Apply light smoothing
-        smoothed_audio = apply_light_smoothing(filtered_audio)
-        
-        return smoothed_audio
+        processed_audio_sample = apply_bandpass_filter(processed_audio_sample)
+
+        processed_audio_sample = apply_modulation_filterbank(processed_audio_sample)
+
+        return processed_audio_sample
         
     except Exception as e:
         logger.error(f"Error in audio processing: {str(e)}")
         # Return original audio on error
         return audio_data
-
-def preprocess_buffer(audio_buffer, *args):
-    """
-    Process a buffer of audio data with simple filtering
-    Accepts noise_profile argument for compatibility but ignores it
-    
-    Parameters:
-    - audio_buffer: Buffer of audio data
-    - *args: For backward compatibility (previously noise_profile)
-    
-    Returns:
-    - Tuple of (processed_buffer, None) for compatibility
-    """
-    # Just process the audio without noise estimation
-    processed_audio = process_audio(audio_buffer)
-    
-    # Return None as the second value for compatibility with existing code
-    return processed_audio, None
-
-
-
-
 
 def play_after_delay(audio_array: np.ndarray,
                      samplerate: int = SAMPLE_RATE,

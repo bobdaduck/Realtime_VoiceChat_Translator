@@ -38,6 +38,7 @@ def initialize_translation_models():
             vad_model=None,  # Disable VAD as we're not using it
             punc_model=None,  # Disable punctuation model if not needed
             disable_pbar=True, #disables progress bar spam
+            disable_update=True, #Don't redownload every time
             # Model download options
             cache_dir=CHINESE_MODEL_PATH,
             automatic_download=True  # Allow automatic download

@@ -16,7 +16,6 @@ def main():
         # Print some information about the audio preprocessing settings
         print(f"Audio preprocessing settings:")
         print(f"  - Bandpass filter: {audio_preprocessing.BANDPASS_LOW}-{audio_preprocessing.BANDPASS_HIGH} Hz")
-        print(f"  - Noise reduction factor: {audio_preprocessing.NOISE_REDUCTION_FACTOR}")
         
         # Start audio capture threads
         print("Starting audio capture threads...")
