@@ -16,6 +16,7 @@ SAMPLE_RATE = 16000
 BANDPASS_LOW = 100
 BANDPASS_HIGH = 3000
 
+volume_cutoff = 0.04
 
 def design_bandpass_filter():
     """Design a bandpass filter to focus on human speech frequencies"""
@@ -65,17 +66,69 @@ def apply_modulation_filterbank(audio, fs=SAMPLE_RATE,
 
     # keep same length
     return out[:len(audio)]
-
+def remove_low_volume(audio_data, threshold=volume_cutoff, smooth_ms=50):
+    """
+    Remove low-volume audio below a certain threshold while preserving louder parts.
+    Optimized for efficiency.
+    """
+    try:
+        # Convert to numpy array if not already
+        audio_data = np.asarray(audio_data, dtype=np.float32)
+        
+        # Store original shape for later
+        original_shape = audio_data.shape
+        flattened = False
+        
+        # Handle multi-channel audio efficiently
+        if len(original_shape) > 1:
+            audio_flat = audio_data.reshape(-1)
+            flattened = True
+        else:
+            audio_flat = audio_data
+            
+        # Fast envelope calculation using absolute values
+        abs_audio = np.abs(audio_flat)
+        
+        # Calculate window size in samples
+        window_size = max(3, int(SAMPLE_RATE * smooth_ms / 1000))
+        if window_size % 2 == 0:
+            window_size += 1
+            
+        # Use scipy's efficient moving average implementation
+        # This is much faster than manual convolution for large arrays
+        envelope = signal.medfilt(abs_audio, kernel_size=window_size)
+        
+        # Fast binary masking (vectorized operation)
+        mask = envelope > threshold
+        
+        # Apply mask (vectorized)
+        processed_audio = audio_flat * mask
+        
+        # Reshape if needed
+        if flattened:
+            processed_audio = processed_audio.reshape(original_shape)
+            
+        logger.info(f"Applied noise gate with threshold {threshold}")
+        return processed_audio
+        
+    except Exception as e:
+        logger.error(f"Error in remove_low_volume: {str(e)}")
+        return audio_data
+    
 def process_audio(audio_data):
     """
     Simple audio processing function that just applies filtering
     """
     processed_audio_sample = audio_data
     try:
+
+        processed_audio_sample = remove_low_volume(processed_audio_sample)
+
         processed_audio_sample = apply_bandpass_filter(processed_audio_sample)
 
         processed_audio_sample = apply_modulation_filterbank(processed_audio_sample)
 
+        play_after_delay(processed_audio_sample)
         return processed_audio_sample
         
     except Exception as e:
