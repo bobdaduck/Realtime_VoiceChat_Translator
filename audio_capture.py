@@ -22,9 +22,9 @@ warnings.filterwarnings("ignore", category=SoundcardRuntimeWarning,
 # Configuration
 SAMPLE_RATE = 16000
 BUFFER_SIZE = 1       # Smaller buffer size may help with discontinuities
-VOLUME_THRESHOLD = 0.01  # Adjust based on testing (0.0-1.0 scale)
-SILENCE_DURATION = 0.5   # Time in seconds of silence before stopping processing
-CHINESE_TEXT_WINDOW = 4  # Number of seconds to keep Chinese text in rolling window
+CHINESE_TEXT_WINDOW = 6  # Number of segments to keep in rolling window
+
+total_audio = np.array([])
 
 # Shared data and locks
 english_display = {
@@ -36,17 +36,21 @@ english_display = {
     "accumulated_text": ""
 }
 
+# Chinese text segments stored as dictionaries in a deque
+chinese_text_segments = deque(maxlen=CHINESE_TEXT_WINDOW)
+
+# Modified: Chinese display now includes text_segments as a separate key
 chinese_display = {
     "transcription": "",
     "translation": "",
     "pinyin": "",
     "last_update_time": 0.0,
     "start_time": 0.0,
-    "accumulated_text": ""
+    "text_segments": chinese_text_segments,  # Renamed from 'segments' to 'text_segments'
+    "full_text": "",
+    "full_audio": ""  # Will store audio data reference
 }
 
-# Rolling window for Chinese text segments
-chinese_text_segments = deque(maxlen=CHINESE_TEXT_WINDOW)
 chinese_last_processed_time = 0
 
 lock = threading.Lock()
@@ -148,7 +152,7 @@ def capture_chinese_audio(chinese_model, loopback_mic, *args):
     Capture Chinese audio and process it with funASR's Paraformer model using a timer-based approach
     Note: *args is used to maintain compatibility with the original function signature
     """
-    global chinese_display, chinese_text_segments, chinese_last_processed_time
+    global chinese_display, chinese_text_segments, chinese_last_processed_time, total_audio 
     
     # Configuration for timer-based processing
     PROCESS_INTERVAL = 3.0  # Process every 3 seconds of audio
@@ -173,10 +177,6 @@ def capture_chinese_audio(chinese_model, loopback_mic, *args):
 
                         # Apply existing audio preprocessing
                         processed_audio = ap.process_audio(audio_data)
-                        ###################only for debugging
-                        # audio_int16 = (processed_audio * 32767).astype(np.int16)
-                        # ap.play_after_delay(audio_int16, SAMPLE_RATE, delay=2.0)
-                        #########################debugging done
 
                         current_time = time.time()
                         
@@ -218,33 +218,56 @@ def capture_chinese_audio(chinese_model, loopback_mic, *args):
                                                             
                                             # The generate method expects waveform data in float32 format
                                             result = chinese_model.generate(audio_for_model)
-                                            # logger.warn(f"funASR generate result: {result}")
-                                            # print(f"funASR generate result: {result}")
 
                                             # Extract the text from the result (check exact structure)
                                             if result and len(result) > 0 and len(result[0]) > 0:
                                                 
-                                                text = result[0].get("text", "")
+                                                text = result[0].get("text", "").replace(" ", "")
                                                 
                                                 if text and text.strip():
                                                     logger.info(f"Chinese text recognized: {text}")
                                                     
-                                                    # Add the completed phrase to our rolling window
+                                                    # Process this segment individually
+                                                    processed = model_work.process_individual_segment(text, is_english=False)
+                                                    
+                                                    # Create a dictionary for this segment that now includes audio data
+                                                    segment = {
+                                                        "transcription": text,
+                                                        "translation": processed["translation"],
+                                                        "pinyin": processed["pinyin"],
+                                                        "audio_data": audio_for_model  # Store audio data with each segment
+                                                    }
+                                                    
                                                     with lock:
-                                                        chinese_text_segments.append(text)
+                                                        # Add the new segment to the deque
+                                                        chinese_text_segments.append(segment)
                                                         
-                                                        # Process the combined text
-                                                        full_text = ' '.join(chinese_text_segments)
-                                                        processed = model_work.process_text(full_text, is_english=False)
+                                                        # Process all segments as a whole for consistency
+                                                        processed_full = model_work.process_chinese_segments(chinese_text_segments)
+                                                        
+                                                        # Store the combined audio data
+                                                        full_audio = np.concatenate([seg["audio_data"] for seg in chinese_text_segments]) if chinese_text_segments else np.array([])
                                                         
                                                         chinese_display = {
-                                                            "transcription": full_text,
-                                                            "translation": processed["translation"],
-                                                            "pinyin": processed["pinyin"],
-                                                            "last_update_time": current_time
+                                                            "transcription": processed_full["transcription"],
+                                                            "translation": processed_full["translation"],
+                                                            "pinyin": processed_full["pinyin"],
+                                                            "last_update_time": current_time,
+                                                            "text_segments": chinese_text_segments,
+                                                            "full_text": processed_full["transcription"],
+                                                            "full_audio": full_audio
                                                         }
                                                         
                                                         chinese_last_processed_time = current_time
+                                                        
+                                                        # Log segments for debugging
+                                                        logger.info(f"Current segments ({len(chinese_text_segments)}):")
+                                                        for i, seg in enumerate(chinese_text_segments):
+                                                            logger.info(f"  {i}: {seg['transcription']} → {seg['translation']}")
+                                                        
+                                                        # Log full text processing
+                                                        logger.info(f"Full text: {processed_full['transcription']}")
+                                                        logger.info(f"Full translation: {processed_full['translation']}")
                                             else:
                                                 logger.info("No speech detected in this audio segment")
                                         else:
@@ -298,3 +321,29 @@ def start_audio_threads(english_model, chinese_model, regular_mic, loopback_mic,
 def get_display_data():
     with lock:
         return english_display.copy(), chinese_display.copy()
+
+def get_chinese_segments():
+    """
+    Get a copy of the current Chinese text segments
+    """
+    with lock:
+        return [segment.copy() for segment in chinese_text_segments]
+
+def clear_chinese_segments():
+    """
+    Clear all Chinese text segments
+    """
+    with lock:
+        chinese_text_segments.clear()
+        
+        # Reset chinese_display to empty state
+        global chinese_display
+        chinese_display = {
+            "transcription": "",
+            "translation": "",
+            "pinyin": "",  
+            "last_update_time": time.time(),
+            "text_segments": chinese_text_segments,
+            "full_text": "",
+            "full_audio": np.array([])
+        }
