@@ -48,7 +48,7 @@ chinese_display = {
     "start_time": 0.0,
     "text_segments": chinese_text_segments,  # Renamed from 'segments' to 'text_segments'
     "full_text": "",
-    "full_audio": ""  # Will store audio data reference
+    # "full_audio": ""  # Will store audio data reference
 }
 
 chinese_last_processed_time = 0
@@ -246,7 +246,7 @@ def capture_chinese_audio(chinese_model, loopback_mic, *args):
                                                         processed_full = model_work.process_chinese_segments(chinese_text_segments)
                                                         
                                                         # Store the combined audio data
-                                                        full_audio = np.concatenate([seg["audio_data"] for seg in chinese_text_segments]) if chinese_text_segments else np.array([])
+                                                        # full_audio = np.concatenate([seg["audio_data"] for seg in chinese_text_segments]) if chinese_text_segments else np.array([])
                                                         
                                                         chinese_display = {
                                                             "transcription": processed_full["transcription"],
@@ -255,7 +255,7 @@ def capture_chinese_audio(chinese_model, loopback_mic, *args):
                                                             "last_update_time": current_time,
                                                             "text_segments": chinese_text_segments,
                                                             "full_text": processed_full["transcription"],
-                                                            "full_audio": full_audio
+                                                            # "full_audio": full_audio
                                                         }
                                                         
                                                         chinese_last_processed_time = current_time
@@ -345,5 +345,5 @@ def clear_chinese_segments():
             "last_update_time": time.time(),
             "text_segments": chinese_text_segments,
             "full_text": "",
-            "full_audio": np.array([])
+            # "full_audio": np.array([])
         }

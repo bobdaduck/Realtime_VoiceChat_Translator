@@ -128,7 +128,7 @@ def process_audio(audio_data):
 
         processed_audio_sample = apply_modulation_filterbank(processed_audio_sample)
 
-        play_after_delay(processed_audio_sample)
+        # play_after_delay(processed_audio_sample) #Debugging
         return processed_audio_sample
         
     except Exception as e:
