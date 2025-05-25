@@ -115,14 +115,14 @@ def remove_low_volume(audio_data, threshold=volume_cutoff, smooth_ms=50):
         logger.error(f"Error in remove_low_volume: {str(e)}")
         return audio_data
     
-def process_audio(audio_data):
+def process_audio(audio_data, is_chinese=True):
     """
     Simple audio processing function that just applies filtering
     """
     processed_audio_sample = audio_data
     try:
-
-        processed_audio_sample = remove_low_volume(processed_audio_sample)
+        if is_chinese: #English audio mic doesn't require threshold
+            processed_audio_sample = remove_low_volume(processed_audio_sample)
 
         processed_audio_sample = apply_bandpass_filter(processed_audio_sample)
 

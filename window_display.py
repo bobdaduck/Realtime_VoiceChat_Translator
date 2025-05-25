@@ -2,7 +2,10 @@ import tkinter as tk
 import ctypes
 import time
 import threading
+import random
+import colorsys
 from tkinter import font
+from audio_capture import CHINESE_TEXT_WINDOW
 
 # Windows-specific constants for transparent/click-through windows
 WS_EX_TRANSPARENT = 0x00000020
@@ -16,17 +19,50 @@ DISPLAY_FONT = ('Arial', 14)
 WINDOW_OPACITY = 0.8
 TEXT_COLOR = '#20EADA'
 
-# Distinct colors for Chinese and pinyin segments (matching pairs)
-SEGMENT_COLORS = [
-    '#20EADA',  # Bright cyan
-    '#FFD700',  # Gold
-    '#FF6B6B',  # Red
-    '#4ECDC4',  # Teal
-    '#45B7D1',  # Blue
-    '#96CEB4',  # Green
-    '#FFEAA7',  # Yellow
-    '#DDA0DD'   # Plum
-]
+# Generate colors dynamically based on CHINESE_TEXT_WINDOW
+def generate_segment_colors(window_size):
+    """Generate a list of distinct colors in blues, yellows, and oranges with controlled lightness"""
+    colors = []
+    random.seed(window_size)  # Use window_size as seed for consistent colors
+    
+    # Define hue ranges for blues, yellows, and oranges
+    color_ranges = [
+        (0.55, 0.75),  # Blues (200-270 degrees)
+        (0.13, 0.20),  # Yellows (47-72 degrees)
+        (0.03, 0.12),  # Oranges (11-43 degrees)
+    ]
+    
+    # Generate colors using HSV color space
+    for i in range(max(8, window_size)):  # At least 8 colors, or more if needed
+        # Cycle through color ranges
+        range_idx = i % len(color_ranges)
+        hue_min, hue_max = color_ranges[range_idx]
+        
+        # Generate hue within the selected range
+        # Use golden ratio for better distribution within the range
+        hue_offset = (i // len(color_ranges)) * 0.618033988749895
+        hue_range = hue_max - hue_min
+        hue = hue_min + ((hue_offset % 1.0) * hue_range)
+        
+        # Controlled saturation and value for consistent lightness
+        saturation = 0.6 + (random.random() * 0.3)  # 0.6 to 0.9 (not too saturated)
+        value = 0.75 + (random.random() * 0.20)     # 0.75 to 0.95 (medium-bright)
+        
+        # Convert HSV to RGB
+        rgb = colorsys.hsv_to_rgb(hue, saturation, value)
+        
+        # Convert to hex color
+        hex_color = '#{:02x}{:02x}{:02x}'.format(
+            int(rgb[0] * 255),
+            int(rgb[1] * 255),
+            int(rgb[2] * 255)
+        )
+        colors.append(hex_color)
+    
+    return colors
+
+# Generate colors based on CHINESE_TEXT_WINDOW
+SEGMENT_COLORS = generate_segment_colors(CHINESE_TEXT_WINDOW)
 
 # Timing configuration for display refresh
 TEXT_DISPLAY_DURATION = 4  # How long to keep text on screen with no updates (seconds)

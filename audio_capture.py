@@ -90,7 +90,7 @@ def capture_english_audio(english_model, regular_mic, *args):
                             continue
                         
                         # Apply simple filtering to the audio
-                        processed_audio = ap.process_audio(audio_data)
+                        processed_audio = ap.process_audio(audio_data, False)
                         
                         audio_int16 = (processed_audio * 32767).astype(np.int16)
                         audio_bytes = audio_int16.tobytes()
