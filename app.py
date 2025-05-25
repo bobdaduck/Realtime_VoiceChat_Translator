@@ -11,7 +11,7 @@ def main():
         
         # Initialize translation models
         print("Loading translation models...")
-        (english_model, chinese_model, _, _, _, _) = model_work.initialize_translation_models()
+        (english_model, chinese_model, _, _, _, _) = model_work.initialize_transcription_models()
         
         # Print some information about the audio preprocessing settings
         print(f"Audio preprocessing settings:")

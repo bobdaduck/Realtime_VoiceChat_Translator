@@ -26,7 +26,7 @@ CHINESE_FILTER_WORDS = [
     "the", "de", "AUNUAY", "dé", "lo", "UY", "u", "YUYUY", "dock", "ASUAOY"
     "HUANSEEEEEREEE", "py", "you", "be", "and", "一", "UUANNUENE", "AASUAAAAAAAOY",
     "UUUUUU", "没有", "没没", "是是", "有没", "嗯嗯", "们的", "HNENUTE", "HUNONU",
-    "helhUAU","HUANERENE", "HUANYEREOY", "igrait", "IUNY"
+    "helhUAU","HUANERENE", "HUANYEREOY", "igrait", "IUNY", "IANEATU"
 ]
 
 def safe_execute(func, *args, default_return=None, operation_name="Unknown operation", **kwargs):
@@ -49,7 +49,7 @@ def safe_execute(func, *args, default_return=None, operation_name="Unknown opera
         
         return default_return
 
-def initialize_translation_models():
+def initialize_transcription_models():
     """Initialize and load all models needed for translation"""
     print("Loading translation models...")
     
@@ -233,6 +233,7 @@ def filter_chinese_text(text):
         operation_name="filter_chinese_text"
     )
 
+
 def translate_chinese_to_english(text):
     """Translate Chinese text to English """
     def _translate():
@@ -245,21 +246,21 @@ def translate_chinese_to_english(text):
             
         logger.info(f"Sending for translation: {filtered_text}")
         
-        # Try multiple translation attempts with different strategies
-        translation_attempts = [
-            lambda: ts.translate_text(filtered_text, translator='caiyun', from_language='zh', to_language='en'),
-            lambda: ts.translate_text(filtered_text, translator='google', from_language='zh', to_language='en'),
-            lambda: ts.translate_text(filtered_text, translator='bing', from_language='zh', to_language='en'),
+        # Try translation services in priority order: Caiyun -> Baidu -> Google
+        translation_services = [
+            ('caiyun', lambda: ts.translate_text(filtered_text, translator='caiyun', from_language='zh', to_language='en')),
+            ('baidu', lambda: ts.translate_text(filtered_text, translator='baidu', from_language='zh', to_language='en')),
+            ('google', lambda: ts.translate_text(filtered_text, translator='google', from_language='zh', to_language='en')),
         ]
         
-        for i, attempt in enumerate(translation_attempts):
+        for service_name, attempt in translation_services:
             try:
                 translation = attempt()
                 if translation and translation.strip():
-                    logger.info(f"Translation returned (attempt {i+1}): {translation}")
+                    logger.info(f"Translation returned from {service_name}: {translation}")
                     return translation
             except Exception as e:
-                logger.warning(f"Translation attempt {i+1} failed: {str(e)}")
+                logger.warning(f"Translation failed with {service_name}: {str(e)}")
                 continue
         
         logger.error(f"All translation attempts failed for text: {filtered_text}")
