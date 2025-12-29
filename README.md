@@ -4,8 +4,8 @@ In order to play games with chinese people who do not speak english, this python
 
 # Process
 
-Coded with the help of Artificial Intelligence, namely Claude, Deepseek, Copilot, and ChatGPT. Each model has different strengths in which challenges it is equipped to solve. 
+Coded with the help of Artificial Intelligence, namely Claude, Deepseek, Copilot, and ChatGPT. Each helping with different aspects of the project. 
 
 # Usage
 
-A vosk english model will need to be downloaded to the project directory and is not provided. The chinese paraformer model will be downloaded automatically. This app uses these models, run locally, to transcribe spoken audio into english and chinese, and then those characters are sent to Baidu's API for translation. Baidu is best in class for zh-en translation tasks, and has higher accuracy than locally run models. Deepseek AI renders comparable translation quality but their API does cost money.
+*A vosk english model will need to be manually downloaded to the project directory as "vosk-en", and is not provided.* The chinese paraformer model will be downloaded automatically. This app uses these models, run locally, to transcribe spoken audio into english and chinese, and then those characters are sent to Baidu's API for translation. Baidu is best in class for zh-en translation tasks, and has higher accuracy than locally run models. Deepseek AI renders comparable translation quality but their API does cost money.

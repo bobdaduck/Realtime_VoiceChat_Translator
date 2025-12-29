@@ -5,7 +5,7 @@ import threading
 import random
 import colorsys
 from tkinter import font
-from audio_capture import CHINESE_TEXT_WINDOW
+from audio_capture import MAX_CHINESE_WORDS
 
 # Windows-specific constants for transparent/click-through windows
 WS_EX_TRANSPARENT = 0x00000020
@@ -18,40 +18,34 @@ LWA_COLORKEY = 0x00000001
 DISPLAY_FONT = ('Arial', 14)
 WINDOW_OPACITY = 0.8
 TEXT_COLOR = '#20EADA'
+PINYIN_COLOR = '#FFA500'  # Orange for pinyin
+CEDICT_COLOR = '#90EE90'  # Light green for CEDICT
 
-# Generate colors dynamically based on CHINESE_TEXT_WINDOW
-def generate_segment_colors(window_size):
-    """Generate a list of distinct colors in blues, yellows, and oranges with controlled lightness"""
+# Generate colors for pinyin words
+def generate_pinyin_word_colors(num_colors=20):
+    """Generate distinct colors for pinyin words"""
     colors = []
-    random.seed(window_size)  # Use window_size as seed for consistent colors
+    random.seed(42)  # Fixed seed for consistency
     
-    # Define hue ranges for blues, yellows, and oranges
     color_ranges = [
-        (0.55, 0.75),  # Blues (200-270 degrees)
-        (0.13, 0.20),  # Yellows (47-72 degrees)
-        (0.03, 0.12),  # Oranges (11-43 degrees)
+        (0.55, 0.75),  # Blues
+        (0.13, 0.20),  # Yellows
+        (0.03, 0.12),  # Oranges
+        (0.85, 0.95),  # Pinks/Magentas
     ]
     
-    # Generate colors using HSV color space
-    for i in range(max(8, window_size)):  # At least 8 colors, or more if needed
-        # Cycle through color ranges
+    for i in range(num_colors):
         range_idx = i % len(color_ranges)
         hue_min, hue_max = color_ranges[range_idx]
         
-        # Generate hue within the selected range
-        # Use golden ratio for better distribution within the range
         hue_offset = (i // len(color_ranges)) * 0.618033988749895
         hue_range = hue_max - hue_min
         hue = hue_min + ((hue_offset % 1.0) * hue_range)
         
-        # Controlled saturation and value for consistent lightness
-        saturation = 0.6 + (random.random() * 0.3)  # 0.6 to 0.9 (not too saturated)
-        value = 0.75 + (random.random() * 0.20)     # 0.75 to 0.95 (medium-bright)
+        saturation = 0.65 + (random.random() * 0.25)
+        value = 0.80 + (random.random() * 0.15)
         
-        # Convert HSV to RGB
         rgb = colorsys.hsv_to_rgb(hue, saturation, value)
-        
-        # Convert to hex color
         hex_color = '#{:02x}{:02x}{:02x}'.format(
             int(rgb[0] * 255),
             int(rgb[1] * 255),
@@ -61,14 +55,8 @@ def generate_segment_colors(window_size):
     
     return colors
 
-# Generate colors based on CHINESE_TEXT_WINDOW
-SEGMENT_COLORS = generate_segment_colors(CHINESE_TEXT_WINDOW)
+PINYIN_WORD_COLORS = generate_pinyin_word_colors()
 
-# Timing configuration for display refresh
-TEXT_DISPLAY_DURATION = 4  # How long to keep text on screen with no updates (seconds)
-CLEAR_DISPLAY_INTERVAL = 4  # How frequently to clear the display for new text (seconds)
-
-# Create a transparent overlay window (special implementation)
 class ClickThroughWindow(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -78,74 +66,131 @@ class ClickThroughWindow(tk.Tk):
         self.attributes('-topmost', True)
         self.overrideredirect(True)
         screen_width = self.winfo_screenwidth()
-        self.geometry(f'{screen_width}x200+0+0')  # Full width at top of screen
+        screen_height = self.winfo_screenheight()
+        self.geometry(f'{screen_width}x{screen_height}+0+0')
         self.configure(bg='black')
         self.wm_attributes("-transparent", "black")
-        
-        # This flag is needed for Windows to properly handle the window
         self.wm_attributes("-toolwindow", True)
         
         # Create layout
-        self.setup_ui(screen_width)
+        self.setup_ui(screen_width, screen_height)
         
-        # Set up Windows-specific transparency behaviors
+        # Set up Windows-specific transparency
         self.after(10, self.setup_window_transparency)
 
-    def setup_ui(self, screen_width):
-        # Create two frames side by side
-        self.left_frame = tk.Frame(self, bg='black')
-        self.left_frame.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
+    def setup_ui(self, screen_width, screen_height):
+        """
+        Create three display areas:
+        1. Top-left quadrant: English text + Pinyin directly below
+        2. Top-right quadrant: Chinese Pinyin (colored) + AI Translation directly below (colored)
+        3. Right side vertical (middle): Cascading individual Chinese words with Pinyin → CEDICT
+        """
         
-        self.right_frame = tk.Frame(self, bg='black')
-        self.right_frame.pack(side=tk.RIGHT, expand=True, fill=tk.BOTH)
+        # Top section container (for the two quadrants)
+        top_section = tk.Frame(self, bg='black', height=200)
+        top_section.pack(side=tk.TOP, fill=tk.X)
+        top_section.pack_propagate(False)
         
-        # Create labels for English side
-        self.english_label = tk.Label(
-            self.left_frame,
+        # === TOP LEFT QUADRANT: English + Pinyin ===
+        self.top_left_frame = tk.Frame(top_section, bg='black')
+        self.top_left_frame.pack(side=tk.LEFT, expand=True, fill=tk.BOTH, padx=10)
+        
+        # Container for vertical stacking
+        left_container = tk.Frame(self.top_left_frame, bg='black')
+        left_container.pack(expand=True)
+        
+        # English text label
+        self.english_text_label = tk.Label(
+            left_container,
             text='',
             font=DISPLAY_FONT,
             fg=TEXT_COLOR,
             bg='black',
-            wraplength=screen_width//2-30,
-            justify='left'
+            wraplength=screen_width//2 - 40,
+            justify='center'
         )
-        self.english_label.pack(expand=True, fill='both')
+        self.english_text_label.pack(pady=(0, 2))
         
-        # Create text widget for Chinese side to support multiple colors
-        self.chinese_text = tk.Text(
-            self.right_frame,
+        # Pinyin for English (directly below, no gap)
+        self.english_pinyin_label = tk.Label(
+            left_container,
+            text='',
+            font=DISPLAY_FONT,
+            fg=PINYIN_COLOR,
+            bg='black',
+            wraplength=screen_width//2 - 40,
+            justify='center'
+        )
+        self.english_pinyin_label.pack(pady=(0, 0))
+        
+        # === TOP RIGHT QUADRANT: Chinese Pinyin (colored) + AI Translation (colored) ===
+        self.top_right_frame = tk.Frame(top_section, bg='black')
+        self.top_right_frame.pack(side=tk.RIGHT, expand=True, fill=tk.BOTH, padx=10)
+        
+        # Container for vertical stacking
+        right_container = tk.Frame(self.top_right_frame, bg='black')
+        right_container.pack(expand=True)
+        
+        # Use Text widget for color-coded pinyin
+        self.chinese_pinyin_text = tk.Text(
+            right_container,
             font=DISPLAY_FONT,
             bg='black',
             borderwidth=0,
             highlightthickness=0,
             wrap='word',
-            width=screen_width//20,  # Approximate width in characters
-            height=10
+            height=2,
+            width=40
         )
-        self.chinese_text.pack(expand=True, fill='both', anchor='e')  # Anchor to the right
+        self.chinese_pinyin_text.pack(pady=(0, 2))
+        self.chinese_pinyin_text.configure(state='disabled')
         
-        # Configure tags for different colors
-        for i, color in enumerate(SEGMENT_COLORS):
-            self.chinese_text.tag_configure(f'chinese_segment_{i}', foreground=color)
-            self.chinese_text.tag_configure(f'pinyin_segment_{i}', foreground=color)  # Same color for matching segments
-            
-        # Configure tag for English translation
-        self.chinese_text.tag_configure('translation', foreground='#AAAAAA')  # Light gray for translation
+        # Configure color tags for pinyin words
+        for i, color in enumerate(PINYIN_WORD_COLORS):
+            self.chinese_pinyin_text.tag_configure(f'color_{i}', foreground=color)
+        
+        # AI Translation label (single green color like CEDICT)
+        self.chinese_translation_label = tk.Label(
+            right_container,
+            text='',
+            font=DISPLAY_FONT,
+            fg=CEDICT_COLOR,  # Use same green as CEDICT
+            bg='black',
+            wraplength=screen_width//2 - 40,
+            justify='center'
+        )
+        self.chinese_translation_label.pack(pady=(0, 0))
+        
+        # === RIGHT SIDE VERTICAL CASCADE (MIDDLE): Individual Chinese Words + CEDICT ===
+        # Position at middle of screen instead of top
+        self.cascade_frame = tk.Frame(self, bg='black', width=450)
+        self.cascade_frame.place(x=screen_width-470, y=screen_height//3, width=450, height=screen_height//2)
+        
+        # Text widget for vertical cascade with scrolling
+        self.cascade_text = tk.Text(
+            self.cascade_frame,
+            font=DISPLAY_FONT,
+            bg='black',
+            fg=PINYIN_COLOR,
+            borderwidth=0,
+            highlightthickness=0,
+            wrap='none',  # Changed to 'none' to keep word pairs on single lines
+            width=40
+        )
+        self.cascade_text.pack(expand=True, fill=tk.BOTH)
+        
+        # Configure tags for cascade display
+        self.cascade_text.tag_configure('pinyin', foreground=PINYIN_COLOR)
+        self.cascade_text.tag_configure('cedict', foreground=CEDICT_COLOR)
         
         # Disable text editing
-        self.chinese_text.configure(state='disabled')
-        
-        # # Add keyboard shortcut to exit (Esc key)
-        # self.bind('<Escape>', lambda e: self.destroy())
-        # self.protocol("WM_DELETE_WINDOW", lambda: self.destroy())
+        self.cascade_text.configure(state='disabled')
 
     def setup_window_transparency(self):
-        """Use Windows-specific API to properly set click-through transparency"""
+        """Use Windows-specific API to set click-through transparency"""
         try:
-            # Get the window handle
             hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
             
-            # Set the window to layered and transparent (this is the key for true click-through)
             ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
             ctypes.windll.user32.SetWindowLongW(
                 hwnd, 
@@ -153,178 +198,125 @@ class ClickThroughWindow(tk.Tk):
                 ex_style | WS_EX_LAYERED | WS_EX_TRANSPARENT
             )
             
-            # Apply transparency color key
             ctypes.windll.user32.SetLayeredWindowAttributes(
                 hwnd,
-                0,  # RGB black 
-                int(WINDOW_OPACITY * 255),  # Alpha value
-                LWA_ALPHA | LWA_COLORKEY  # Using both alpha blending and color key
+                0,
+                int(WINDOW_OPACITY * 255),
+                LWA_ALPHA | LWA_COLORKEY
             )
             
-            # Create a subclass for all child windows
-            def subclass_func(hwnd, msg, wparam, lparam, uid, data):
-                return ctypes.windll.user32.DefWindowProcW(hwnd, msg, wparam, lparam)
-            
-            # Find all child windows recursively and make them non-interactive
             def make_all_children_noninteractive(parent_widget):
                 for child in parent_widget.winfo_children():
-                    # Try to get hwnd for this child
                     if hasattr(child, 'winfo_id'):
                         child_hwnd = child.winfo_id() 
                         if child_hwnd:
-                            # Get current style
                             child_style = ctypes.windll.user32.GetWindowLongW(child_hwnd, GWL_EXSTYLE)
-                            # Set transparent and layered
                             ctypes.windll.user32.SetWindowLongW(
                                 child_hwnd, 
                                 GWL_EXSTYLE, 
                                 child_style | WS_EX_TRANSPARENT | WS_EX_LAYERED
                             )
-                            
-                            # Also apply transparency attributes
                             ctypes.windll.user32.SetLayeredWindowAttributes(
                                 child_hwnd, 
-                                0,  # RGB black
-                                int(WINDOW_OPACITY * 255),  # Alpha
-                                LWA_ALPHA | LWA_COLORKEY  # Both modes
+                                0,
+                                int(WINDOW_OPACITY * 255),
+                                LWA_ALPHA | LWA_COLORKEY
                             )
-                    
-                    # Recursively process its children
                     make_all_children_noninteractive(child)
             
-            # Apply to all children
             make_all_children_noninteractive(self)
             
         except Exception as e:
             print(f"Error setting up transparency: {e}")
 
-def update_displays(root, english_label, chinese_text, get_display_data_func):
-    """Update the display labels with the latest transcription data"""
+
+def update_displays(root, get_display_data_func):
+    """Update all three display areas with the latest transcription data"""
     english_display, chinese_display = get_display_data_func()
     
     current_time = time.time()
     
-    # Initialize attributes if they don't exist yet
-    if not hasattr(english_label, "last_text"):
-        english_label.last_text = ""
-        english_label.last_update_time = current_time
-        english_label.display_start_time = current_time
-        english_label.should_clear = False
-        
-    if not hasattr(chinese_text, "last_update_time"):
-        chinese_text.last_update_time = current_time
-        chinese_text.display_start_time = current_time
-        chinese_text.should_clear = False
+    # Initialize tracking attributes if needed
+    if not hasattr(root, "last_texts"):
+        root.last_texts = {
+            'english': "",
+            'english_pinyin': "",
+            'chinese_pinyin': "",
+        }
     
-    # Handle English display (microphone)
-    if english_display["transcription"]:
-        # Check if this is new text
-        if english_display["transcription"] != english_label.last_text:
-            # Check if we should clear the display before showing new text
-            elapsed_since_last_clear = current_time - getattr(english_label, "display_start_time", 0)
-            if elapsed_since_last_clear > CLEAR_DISPLAY_INTERVAL or english_label.should_clear:
-                # Start with fresh text instead of appending
-                # Display English transcription and translation
-                english_text = f"{english_display['transcription']}"
-                if english_display.get('translation'):
-                    english_text += f"\n{english_display['translation']}"
-                english_label.display_start_time = current_time
-                english_label.should_clear = False
-            else:
-                # Keep existing text if within the clear interval
-                english_text = english_label.last_text
-                if english_display.get('translation'):
-                    english_text += f"\n{english_display['translation']}"
-            
-            # Update the label
-            english_label.config(text=english_text)
-            english_label.last_text = english_display['transcription']
-            english_label.last_update_time = current_time
-    else:
-        # If no new text, check if we should clear the display
-        if hasattr(english_label, "last_update_time"):
-            time_since_update = current_time - english_label.last_update_time
-            if time_since_update > TEXT_DISPLAY_DURATION:
-                english_label.config(text="")
-                english_label.last_text = ""
-                english_label.should_clear = True
+    # === UPDATE TOP LEFT: English text + Pinyin (from segments) ===
+    english_text = english_display.get("transcription", "")
+    english_pinyin = english_display.get("pinyin", "")
     
-    # Handle Chinese display (system audio) with color gradients
-    if chinese_display.get("text_segments") and len(chinese_display["text_segments"]) > 0:
-        # Enable text widget for editing
-        chinese_text.configure(state='normal')
+    # Update if content changed
+    if english_text != root.last_texts['english'] or english_pinyin != root.last_texts['english_pinyin']:
+        root.english_text_label.config(text=english_text)
+        root.english_pinyin_label.config(text=english_pinyin)
+        root.last_texts['english'] = english_text
+        root.last_texts['english_pinyin'] = english_pinyin
+        if english_text:
+            print(f"[DISPLAY] English: '{english_text}'")
+    
+    # === UPDATE TOP RIGHT: Chinese Pinyin (colored) + AI Translation (green) ===
+    chinese_pinyin = chinese_display.get("pinyin", "")
+    chinese_translation = chinese_display.get("translation", "")
+    
+    # Update if content changed
+    if chinese_pinyin != root.last_texts['chinese_pinyin']:
         
-        # Clear current content
-        chinese_text.delete('1.0', tk.END)
+        # Update colored pinyin
+        if chinese_pinyin:
+            pinyin_words = chinese_pinyin.split()
+            root.chinese_pinyin_text.configure(state='normal')
+            root.chinese_pinyin_text.delete('1.0', tk.END)
+            for i, word in enumerate(pinyin_words):
+                root.chinese_pinyin_text.insert(tk.END, word, f'color_{i % len(PINYIN_WORD_COLORS)}')
+                if i < len(pinyin_words) - 1:
+                    root.chinese_pinyin_text.insert(tk.END, " ")
+            root.chinese_pinyin_text.configure(state='disabled')
+        else:
+            root.chinese_pinyin_text.configure(state='normal')
+            root.chinese_pinyin_text.delete('1.0', tk.END)
+            root.chinese_pinyin_text.configure(state='disabled')
         
-        # Get individual segments from the deque for coloring
-        segments = list(chinese_display["text_segments"])
-        num_segments = len(segments)
+        # Update colored translation (single green color)
+        root.chinese_translation_label.config(text=chinese_translation if chinese_translation else "")
         
-        # Split the main transcription and pinyin by segments for coloring
-        # Since we have the processed transcription and pinyin, we need to map them to segments
-        transcription_text = chinese_display.get('transcription', '')
-        pinyin_text = chinese_display.get('pinyin', '')
+        root.last_texts['chinese_pinyin'] = chinese_pinyin
+    
+    # === UPDATE RIGHT SIDE CASCADE: Individual Chinese Words + CEDICT ===
+    cascade_words = chinese_display.get("cascade_words", [])
+    
+    if cascade_words:
+        root.cascade_text.configure(state='normal')
+        root.cascade_text.delete('1.0', tk.END)
         
-        if transcription_text:
-            # Split transcription into parts based on segments
-            transcription_parts = []
-            pinyin_parts = []
+        for word_data in cascade_words:
+            pinyin = word_data.get("pinyin", "")
+            cedict_trans = word_data.get("cedict", "")
             
-            for i, segment in enumerate(segments):
-                if segment.get("transcription"):
-                    transcription_parts.append(segment["transcription"])
-                if segment.get("pinyin"):
-                    pinyin_parts.append(segment["pinyin"])
-            
-            # Display Chinese text segments with distinct colors
-            for i, part in enumerate(transcription_parts):
-                color_idx = i % len(SEGMENT_COLORS)  # Cycle through distinct colors
-                chinese_text.insert(tk.END, part, f'chinese_segment_{color_idx}')
-                if i < len(transcription_parts) - 1:
-                    chinese_text.insert(tk.END, " ")
-            
-            # Add newline before pinyin
-            chinese_text.insert(tk.END, "\n")
-            
-            # Display pinyin segments with matching colors
-            for i, part in enumerate(pinyin_parts):
-                color_idx = i % len(SEGMENT_COLORS)  # Same color as corresponding Chinese segment
-                chinese_text.insert(tk.END, part, f'pinyin_segment_{color_idx}')
-                if i < len(pinyin_parts) - 1:
-                    chinese_text.insert(tk.END, " ")
+            if pinyin:
+                root.cascade_text.insert(tk.END, pinyin, 'pinyin')
+                if cedict_trans:
+                    root.cascade_text.insert(tk.END, f"  →  {cedict_trans}", 'cedict')
+                root.cascade_text.insert(tk.END, "\n")
         
-        # Add translation (if available) at the bottom in light gray
-        if chinese_display.get('translation'):
-            chinese_text.insert(tk.END, f"\n{chinese_display['translation']}", 'translation')
-        
-        # Update last update time
-        chinese_text.last_update_time = current_time
-        
-        # Disable text widget again
-        chinese_text.configure(state='disabled')
-        
+        root.cascade_text.configure(state='disabled')
+        root.cascade_text.see(tk.END)
     else:
-        # If no segments, check if we should clear the display
-        if hasattr(chinese_text, "last_update_time"):
-            time_since_update = current_time - chinese_text.last_update_time
-            if time_since_update > TEXT_DISPLAY_DURATION:
-                chinese_text.configure(state='normal')
-                chinese_text.delete('1.0', tk.END)
-                chinese_text.configure(state='disabled')
-                chinese_text.should_clear = True
+        root.cascade_text.configure(state='normal')
+        root.cascade_text.delete('1.0', tk.END)
+        root.cascade_text.configure(state='disabled')
     
     # Continue updating
-    root.after(100, lambda: update_displays(root, english_label, chinese_text, get_display_data_func))
-    
+    root.after(100, lambda: update_displays(root, get_display_data_func))
+
+
 def create_window(get_display_data_func):
     """Create and run the main window"""
-    # Create the main window using our custom class
     root = ClickThroughWindow()
-    english_label = root.english_label
-    chinese_text = root.chinese_text
-
+    
     # Start display updates
-    root.after(100, lambda: update_displays(root, english_label, chinese_text, get_display_data_func))
+    root.after(100, lambda: update_displays(root, get_display_data_func))
     
     return root

@@ -1,0 +1,15 @@
+soundcard
+vosk
+numpy<2.0.0
+scipy
+sounddevice
+pypinyin
+translators
+funasr
+torch
+torchaudio
+jieba
+
+transformers
+sentencepiece
+ollama

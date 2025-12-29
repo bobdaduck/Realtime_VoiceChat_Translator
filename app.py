@@ -1,13 +1,18 @@
 import audio_capture
-import model_work
+import translation_framework.model_work as model_work
+import translation_framework.ai_translators as ai_translators
 import window_display
-import audio_preprocessing  # Import the new module
+import audio_preprocessing
 
 def main():
     try:
         # Initialize audio devices
         print("Initializing audio devices...")
         loopback_mic, regular_mic = audio_capture.initialize_audio_devices()
+        
+        # Initialize AI translation (THIS IS THE CRITICAL MISSING PIECE)
+        print("Initializing AI translation...")
+        ai_translators.initialize_ai_translator("opus")
         
         # Initialize translation models
         print("Loading translation models...")
